@@ -151,10 +151,19 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
     fetchMessages();
 
     const channel = supabase
-      .channel('public:radio_messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'radio_messages' }, payload => {
-        setMessages(prev => [...prev, payload.new]);
-      })
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'radio_messages',
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new]);
+          setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+      )
       .subscribe();
 
     return () => {
@@ -167,40 +176,49 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
       .from('radio_messages')
       .select('*')
       .order('created_at', { ascending: true });
-    
+
     if (!error && data) {
       setMessages(data);
+      setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }
   };
 
-  useEffect(() => () => { 
-    if (timer.current) clearTimeout(timer.current); 
-    recorder.current?.stream.getTracks().forEach(t => t.stop()); 
-    urls.current.forEach(url => URL.revokeObjectURL(url)); 
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+    recorder.current?.stream.getTracks().forEach((t) => t.stop());
+    urls.current.forEach((url) => URL.revokeObjectURL(url));
   }, []);
 
   const record = async () => {
-    if (recording) { recorder.current?.stop(); if (timer.current) clearTimeout(timer.current); return; }
+    if (recording) {
+      recorder.current?.stop();
+      if (timer.current) clearTimeout(timer.current);
+      return;
+    }
     setRecordError('');
-    try { 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
-      const media = new MediaRecorder(stream); 
-      recorder.current = media; 
-      const chunks: BlobPart[] = []; 
-      media.ondataavailable = event => { if (event.data.size) chunks.push(event.data); }; 
-      media.onstop = () => { 
-        stream.getTracks().forEach(t => t.stop()); 
-        setRecording(false); 
-        const url = URL.createObjectURL(new Blob(chunks, { type: media.mimeType })); 
-        urls.current.push(url); 
-        setAudioMessages(previous => [...previous, url]); 
-      }; 
-      media.start(); 
-      setRecording(true); 
-      timer.current = setTimeout(() => { if (media.state === 'recording') media.stop(); }, 10000); 
-    } catch { 
-      setRecording(false); 
-      setRecordError('Mikrofon açılamadı. Tarayıcının mikrofon iznini kontrol et.'); 
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const media = new MediaRecorder(stream);
+      recorder.current = media;
+      const chunks: BlobPart[] = [];
+      media.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      media.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const url = URL.createObjectURL(new Blob(chunks, { type: media.mimeType }));
+        urls.current.push(url);
+        setAudioMessages((previous) => [...previous, url]);
+      };
+      media.start();
+      setRecording(true);
+      timer.current = setTimeout(() => {
+        if (media.state === 'recording') media.stop();
+      }, 10000);
+    } catch {
+      setRecording(false);
+      setRecordError('Mikrofon açılamadı. Tarayıcının mikrofon iznini kontrol et.');
     }
   };
 
@@ -208,71 +226,109 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
     e.preventDefault();
     if (!message.trim()) return;
 
-    const newMessage = {
-      channel_name: 'E-5 / TEM Hattı',
-      sender_name: 'Ahmet Yılmaz',
-      sender_plate: '42 ABC 34',
-      message: message.trim()
-    };
+    const msgText = message.trim();
+    setMessage('');
 
-    const { error } = await supabase.from('radio_messages').insert([newMessage]);
+    const { error } = await supabase.from('radio_messages').insert([
+      {
+        channel_name: 'E-5 / TEM Hattı',
+        sender_name: 'Ahmet Yılmaz',
+        sender_plate: '42 ABC 34',
+        message: msgText,
+      },
+    ]);
 
-    if (!error) {
-      setMessage('');
-      setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-    } else {
+    if (error) {
       console.error('Mesaj gönderilemedi:', error.message);
+    } else {
+      fetchMessages();
     }
   };
 
   return (
     <section className="panel chat-panel">
       <div className="chat-title">
-        <h2><MessageSquare className="text-blue" />Genel sohbet</h2>
-        <span>● Canlı Bağlı</span>
+        <h2>
+          <MessageSquare className="text-blue" />
+          Genel sohbet
+        </h2>
+        <span>● Canlı Bağlı ({messages.length} mesaj)</span>
       </div>
-      <div className="chat-messages">
-        {messages.map((item, index) => {
-          const timeString = new Date(item.created_at || Date.now()).toLocaleTimeString('tr', { hour: '2-digit', minute: '2-digit' });
-          return (
-            <div className="chat-message" key={item.id || index}>
-              <Avatar>AY</Avatar>
-              <div className="message-body">
-                <div className="message-author">
-                  <strong>{item.sender_name} {item.sender_plate ? `(${item.sender_plate})` : ''}</strong>
-                  <time>{timeString}</time>
+      
+      <div className="chat-messages" style={{ minHeight: '200px', maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', padding: '12px 0' }}>
+        {messages.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">Henüz mesaj yok. İlk mesajı sen yaz!</p>
+        ) : (
+          messages.map((item, index) => {
+            const timeString = item.created_at
+              ? new Date(item.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+              : '';
+            return (
+              <div className="chat-message" key={item.id || index} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                <Avatar>
+                  {item.sender_name
+                    ? item.sender_name
+                        .split(' ')
+                        .map((n: string) => n[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase()
+                    : 'AY'}
+                </Avatar>
+                <div className="message-body" style={{ flex: 1 }}>
+                  <div className="message-author" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong>
+                      {item.sender_name} {item.sender_plate ? `(${item.sender_plate})` : ''}
+                    </strong>
+                    <time style={{ fontSize: '10px', opacity: 0.6 }}>{timeString}</time>
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '13px' }}>{item.message}</p>
                 </div>
-                <p>{item.message}</p>
               </div>
-            </div>
-          );
-        })}
-        {audioMessages.map(url => (
+            );
+          })
+        )}
+
+        {audioMessages.map((url) => (
           <div className="chat-message" key={url}>
             <Avatar>AY</Avatar>
             <div className="message-body">
-              <div className="message-author"><strong>Ahmet Y. · Sen</strong></div>
+              <div className="message-author">
+                <strong>Ahmet Y. · Sen</strong>
+              </div>
               <audio controls src={url} className="w-full h-9 mt-2" aria-label="Sesli mesajın" />
             </div>
           </div>
         ))}
         <div ref={chatEnd} />
       </div>
+
       <form className="chat-form" onSubmit={sendMessage}>
-        <input 
-          placeholder={recording ? 'Kaydediliyor… en fazla 10 sn' : 'Yoldaşlarına bir şeyler yaz...'} 
-          value={message} 
-          onChange={event => setMessage(event.target.value)} 
-          aria-label="Mesajın" 
+        <input
+          placeholder={recording ? 'Kaydediliyor… en fazla 10 sn' : 'Yoldaşlarına bir şeyler yaz...'}
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          aria-label="Mesajın"
         />
-        <Button type="button" variant="ghost" aria-label={recording ? 'Kaydı durdur' : 'Sesli mesaj kaydet'} onClick={record} className={recording ? 'text-destructive' : 'text-muted-foreground'}>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-label={recording ? 'Kaydı durdur' : 'Sesli mesaj kaydet'}
+          onClick={record}
+          className={recording ? 'text-destructive' : 'text-muted-foreground'}
+        >
           <Mic size={13} />
         </Button>
         <Button type="submit" variant="ghost" className="text-primary" aria-label="Mesaj gönder">
           <Send size={13} />
         </Button>
       </form>
-      {recordError && <p role="alert" className="text-destructive text-[10px] mt-2">{recordError}</p>}
+
+      {recordError && (
+        <p role="alert" className="text-destructive text-[10px] mt-2">
+          {recordError}
+        </p>
+      )}
       <div className="demo-label">{compact ? 'Canlı tır sohbet hattı' : 'Tüm yoldaşlarla ortak frekans'}</div>
     </section>
   );
