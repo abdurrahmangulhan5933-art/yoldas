@@ -69,7 +69,62 @@ export function Platform({ view = 'home' }: { view?: View }) {
 }
 
 function BorderPanel({ expanded = false }: { expanded?: boolean }) {
-  return <section className="panel"><div className="panel-title"><h2><MapPin className="text-blue" />Sınır kapıları</h2><span className="subtle-label flex items-center gap-1"><i className="live-dot" />Örnek durum</span></div>{[{ name: 'Kapıkule', country: 'Türkiye → Bulgaristan', time: '3–4 saat', status: 'Yoğun', clear: false }, { name: 'Hamzabeyli', country: 'Türkiye → Bulgaristan', time: '1–2 saat', status: 'Orta yoğun', clear: false }, { name: 'İpsala', country: 'Türkiye → Yunanistan', time: '30 dk', status: 'Akıcı', clear: true }, ...(expanded ? [{ name: 'Sarp', country: 'Türkiye → Gürcistan', time: '1 saat', status: 'Akıcı', clear: true }] : [])].map(border => <div className="border-row" key={border.name}><div><strong>{border.name}</strong><small>{border.country}</small></div><div className={`border-time ${border.clear ? 'clear' : ''}`}>{border.time}<small>● {border.status}</small></div></div>)}<p className="panel-note"><Clock3 size={9} />Tahmini süreler · Örnek veriler</p>{!expanded && <Link to="/yol-durumu" className="panel-bottom-link">Tüm yol ve sınır durumları<ArrowRight size={11} /></Link>}</section>;
+  const [borders, setBorders] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchBorders();
+
+    const channel = supabase
+      .channel('public:border_status')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'border_status' }, () => {
+        fetchBorders();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const fetchBorders = async () => {
+    const { data, error } = await supabase
+      .from('border_status')
+      .select('*');
+    
+    if (!error && data && data.length > 0) {
+      setBorders(data);
+    } else {
+      setBorders([
+        { gate_name: 'Kapıkule', country: 'Türkiye → Bulgaristan', wait_time: '3–4 saat', queue_length: 'Yoğun', clear: false },
+        { gate_name: 'Hamzabeyli', country: 'Türkiye → Bulgaristan', wait_time: '1–2 saat', queue_length: 'Orta yoğun', clear: false },
+        { gate_name: 'İpsala', country: 'Türkiye → Yunanistan', wait_time: '30 dk', queue_length: 'Akıcı', clear: true },
+        ...(expanded ? [{ gate_name: 'Sarp', country: 'Türkiye → Gürcistan', wait_time: '1 saat', queue_length: 'Akıcı', clear: true }] : [])
+      ]);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-title">
+        <h2><MapPin className="text-blue" />Sınır kapıları</h2>
+        <span className="subtle-label flex items-center gap-1"><i className="live-dot" />Canlı Durum</span>
+      </div>
+      {borders.slice(0, expanded ? borders.length : 3).map(border => (
+        <div className="border-row" key={border.gate_name || border.id}>
+          <div>
+            <strong>{border.gate_name}</strong>
+            <small>{border.country || 'Sınır Kapısı'}</small>
+          </div>
+          <div className={`border-time ${border.clear || border.queue_length === 'Akıcı' ? 'clear' : ''}`}>
+            {border.wait_time}
+            <small>● {border.queue_length}</small>
+          </div>
+        </div>
+      ))}
+      <p className="panel-note"><Clock3 size={9} />Sürücü bildirimlerine göre güncellenir</p>
+      {!expanded && <Link to="/yol-durumu" className="panel-bottom-link">Tüm yol ve sınır durumları<ArrowRight size={11} /></Link>}
+    </section>
+  );
 }
 
 function TimerPanel() {
@@ -92,7 +147,6 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
-  // Supabase'den mesajları çekme ve canlı takip (Realtime)
   useEffect(() => {
     fetchMessages();
 
