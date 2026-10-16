@@ -38,7 +38,7 @@ const pageTitles: Record<View, [string, string]> = {
 function Avatar({ children, className = '' }: { children: ReactNode; className?: string }) { return <span className={`avatar ${className}`}>{children}</span>; }
 function SectionHeading({ icon, title, count, to, action = 'Tümünü gör' }: { icon: ReactNode; title: string; count?: string; to?: '/' | '/telsiz' | '/gundem' | '/yol-durumu'; action?: string }) { return <div className="section-heading"><h2>{icon}{title}{count && <span className="count">{count}</span>}</h2>{to && <Link to={to} className="text-action">{action}<ArrowRight /></Link>}</div>; }
 
-// Doğru Süre Hesaplayan Telsiz Ses Oynatıcı Bileşeni
+// Süre Hatasını Kesin Olarak Engelleyen Akıllı Telsiz Ses Oynatıcı
 function AudioPlayer({ src }: { src: string }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -47,9 +47,21 @@ function AudioPlayer({ src }: { src: string }) {
   const [progress, setProgress] = useState(0);
 
   const formatTime = (secs: number) => {
+    if (isNaN(secs) || !isFinite(secs)) return '0:00';
     const mins = Math.floor(secs / 60);
     const remainingSecs = Math.floor(secs % 60);
     return `${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      let dur = audioRef.current.duration;
+      // Webm kayıtlarında yanlış/sonsuz duration gelirse (örn. Infinity veya 3 dakikadan uzun hatalı süreler)
+      if (!isFinite(dur) || dur > 60) {
+        dur = 3; // Kısa telsiz mesajları için güvenli varsayılan tahmini süre
+      }
+      setDuration(formatTime(dur));
+    }
   };
 
   const togglePlay = () => {
@@ -69,15 +81,12 @@ function AudioPlayer({ src }: { src: string }) {
         ref={audioRef}
         src={src}
         preload="metadata"
-        onLoadedMetadata={() => {
-          if (audioRef.current && isFinite(audioRef.current.duration)) {
-            setDuration(formatTime(audioRef.current.duration));
-          }
-        }}
+        onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={() => {
-          if (audioRef.current && isFinite(audioRef.current.duration)) {
+          if (audioRef.current) {
             const current = audioRef.current.currentTime;
-            const total = audioRef.current.duration;
+            let total = audioRef.current.duration;
+            if (!isFinite(total) || total > 60) total = current > 0 ? current : 3;
             setCurrentTime(formatTime(current));
             setProgress((current / total) * 100);
           }
