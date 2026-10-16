@@ -98,7 +98,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [dialog, setDialog] = useState<'help' | 'notifications' | 'profile' | 'radio' | 'support' | null>(null);
   const [article, setArticle] = useState<any | null>(null);
   const [newsList, setNewsList] = useState<any[]>([]);
-  const [activeParticipants, setActiveParticipants] = useState<string[]>([]);
+  const [remoteParticipantsCount, setRemoteParticipantsCount] = useState(0);
 
   const roomRef = useRef<Room | null>(null);
   const audioContainerRef = useRef<HTMLDivElement>(null);
@@ -150,15 +150,9 @@ export function Platform({ view = 'home' }: { view?: View }) {
     };
   }, []);
 
-  const updateParticipantsList = (room: Room) => {
-    const names: string[] = [];
-    if (room.localParticipant) {
-      names.push(room.localParticipant.identity || 'Ben');
-    }
-    room.remoteParticipants.forEach((p) => {
-      if (p.identity) names.push(p.identity);
-    });
-    setActiveParticipants(names);
+  const updateRoomStats = (room: Room) => {
+    // Sadece BAŞKA sürücüleri sayıyoruz (kendimizi hariç tutuyoruz)
+    setRemoteParticipantsCount(room.remoteParticipants.size);
   };
 
   const toggleLiveVoiceRoom = async (channelIndex: number) => {
@@ -171,7 +165,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
       }
       setJoined(false);
       setTalking(false);
-      setActiveParticipants([]);
+      setRemoteParticipantsCount(0);
       return;
     }
 
@@ -211,12 +205,14 @@ export function Platform({ view = 'home' }: { view?: View }) {
       };
 
       room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-      room.on(RoomEvent.ParticipantConnected, () => updateParticipantsList(room));
-      room.on(RoomEvent.ParticipantDisconnected, () => updateParticipantsList(room));
+      
+      // Profesyonel katılımcı takip dinleyicileri
+      room.on(RoomEvent.ParticipantConnected, () => updateRoomStats(room));
+      room.on(RoomEvent.ParticipantDisconnected, () => updateRoomStats(room));
 
       await room.connect(wsUrl, token);
       
-      updateParticipantsList(room);
+      updateRoomStats(room);
       setJoined(true);
       setTalking(false); // Başlangıçta dinleme modunda başlar
       
@@ -225,7 +221,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
         noiseSuppression: true,
       });
       await room.localParticipant.publishTrack(audioTrack);
-      await audioTrack.mute(); // Mikrofonu kapalı olarak başlatıyoruz
+      await audioTrack.mute(); // İlk başta mikrofon kapalı
 
     } catch (err) {
       console.error('Canlı ses odasına bağlanılamadı:', err);
@@ -335,8 +331,8 @@ export function Platform({ view = 'home' }: { view?: View }) {
         .filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')))
         .map(({ item, index }) => {
           const isCurrentRoom = joined && channel === index;
-          // Tamamen gerçek katılımcı sayısı (Girilmemişse 0)
-          const displayCount = isCurrentRoom ? activeParticipants.length : 0;
+          // Profesyonel Yaklaşım: Odadaysanız diğer sürücü sayısını, değilse 0 gösterir
+          const displayCount = isCurrentRoom ? remoteParticipantsCount : 0;
           
           return (
             <article className={`channel-card ${isCurrentRoom ? 'selected' : ''}`} key={item.name}>
@@ -348,14 +344,13 @@ export function Platform({ view = 'home' }: { view?: View }) {
               <p>{item.subtitle}</p>
               <div className="channel-footer">
                 <div className="avatars">
-                  {isCurrentRoom && activeParticipants.length > 0 ? (
-                    activeParticipants.slice(0, 3).map((pName) => (
-                      <Avatar key={pName}>{pName.substring(0, 2).toUpperCase()}</Avatar>
-                    ))
-                  ) : (
-                    <Avatar>YD</Avatar>
-                  )}
-                  <span><Users size={10} className="inline mr-1" />{displayCount} Sürücü Odada</span>
+                  <Avatar>YD</Avatar>
+                  <span>
+                    <Users size={10} className="inline mr-1" />
+                    {isCurrentRoom 
+                      ? (displayCount === 0 ? 'Odada Başka Kimse Yok (Yalnızsın)' : `${displayCount} Başka Sürücü Odada`) 
+                      : 'Oda Boş (Katılmayı Bekliyor)'}
+                  </span>
                 </div>
                 <Button
                   variant="outline"
@@ -441,7 +436,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
         <div className="radio-station-icon"><Radio size={23} /></div>
         <div>
           <strong>{initialChannels[channel]?.name}</strong>
-          <small><i className="live-dot" />{joined ? `Aktif Kanal (${activeParticipants.length} Sürücü)` : 'Frekans Bekleniyor'}</small>
+          <small><i className="live-dot" />{joined ? (remoteParticipantsCount === 0 ? 'Odada Kimse Yok (Yalnızsın)' : `${remoteParticipantsCount} Sürücü Dinliyor`) : 'Frekans Bekleniyor'}</small>
         </div>
       </div>
       <div className="divider" />
