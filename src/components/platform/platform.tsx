@@ -7,7 +7,7 @@ import truckImage from '@/assets/truck-road.jpg';
 import { calculateFuelCost, formatCountdown } from '@/lib/driver-tools';
 import { supabase } from '../../supabase';
 import { getLiveKitToken } from '../../lib/livekit-actions';
-import { Room, RoomEvent, createLocalAudioTrack, RemoteParticipant, RemoteTrackPublication, RemoteTrack } from 'livekit-client';
+import { Room, RoomEvent, createLocalAudioTrack, RemoteTrack } from 'livekit-client';
 
 export type View = 'home' | 'radio' | 'messages' | 'news' | 'roads' | 'tools';
 const navigation = [
@@ -20,12 +20,12 @@ const navigation = [
 ] as const;
 
 const initialChannels = [
-  { name: 'E-5 / TEM Hattı', subtitle: 'Yolun nabzı burada atıyor.', icon: Navigation, tone: '' },
-  { name: 'Kapıkule Sınır Kapısı', subtitle: 'Sınırdan en güncel bilgiler.', icon: Truck, tone: 'green' },
-  { name: 'Avrupa Rotaları', subtitle: 'Uzak yollar, yakın dostluklar.', icon: Compass, tone: '' },
-  { name: 'Gece Sürüşü', subtitle: 'Geceye birlikte yol alıyoruz.', icon: Moon, tone: 'amber' },
-  { name: 'Anadolu Yolları', subtitle: 'Memleketin dört bir yanından.', icon: MapPin, tone: 'green' },
-  { name: 'Mola Yeri Sohbetleri', subtitle: 'Çaylar hazır, sohbet koyu.', icon: Coffee, tone: 'amber' },
+  { name: 'E-5 / TEM Hattı', subtitle: 'Yolun nabzı burada atıyor.', icon: Navigation, tone: '', count: 14 },
+  { name: 'Kapıkule Sınır Kapısı', subtitle: 'Sınırdan en güncel bilgiler.', icon: Truck, tone: 'green', count: 9 },
+  { name: 'Avrupa Rotaları', subtitle: 'Uzak yollar, yakın dostluklar.', icon: Compass, tone: '', count: 6 },
+  { name: 'Gece Sürüşü', subtitle: 'Geceye birlikte yol alıyoruz.', icon: Moon, tone: 'amber', count: 5 },
+  { name: 'Anadolu Yolları', subtitle: 'Memleketin dört bir yanından.', icon: MapPin, tone: 'green', count: 8 },
+  { name: 'Mola Yeri Sohbetleri', subtitle: 'Çaylar hazır, sohbet koyu.', icon: Coffee, tone: 'amber', count: 4 },
 ];
 
 const pageTitles: Record<View, [string, string]> = {
@@ -92,7 +92,7 @@ function AudioPlayer({ src }: { src: string }) {
 export function Platform({ view = 'home' }: { view?: View }) {
   const [channel, setChannel] = useState(0);
   const [joined, setJoined] = useState(false);
-  const [talking, setTalking] = useState(false);
+  const [talking, setTalking] = useState(false); // true: Mikrofon açık (konuşuyor), false: Susturuldu (sadece dinliyor)
   const [muted, setMuted] = useState(false);
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<'help' | 'notifications' | 'profile' | 'radio' | 'support' | null>(null);
@@ -211,7 +211,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
       };
 
       room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-      
       room.on(RoomEvent.ParticipantConnected, () => updateParticipantsList(room));
       room.on(RoomEvent.ParticipantDisconnected, () => updateParticipantsList(room));
 
@@ -219,21 +218,24 @@ export function Platform({ view = 'home' }: { view?: View }) {
       
       updateParticipantsList(room);
       setJoined(true);
-      setTalking(true);
+      setTalking(false); // Varsayılan olarak odaya girince DINLEME modunda (susturulmuş) başlar ki diğerlerini rahatça duyabilsin!
       
       const audioTrack = await createLocalAudioTrack({
         echoCancellation: true,
         noiseSuppression: true,
       });
       await room.localParticipant.publishTrack(audioTrack);
+      // Başlangıçta mikrofonu kapalı (mute) yapıyoruz ki dinleyebilsin
+      await audioTrack.mute();
 
     } catch (err) {
       console.error('Canlı ses odasına bağlanılamadı:', err);
       setJoined(false);
-      alert('Canlı ses odasına bağlanırken bir hata oluştu. Lütfen mikrofon izinlerinizi kontrol edin.');
+      alert('Canlı ses odasına bağlanırken hata oluştu.');
     }
   };
 
+  // Profesyonel Telsiz Bas-Konuş (PTT) / Dinleme Geçişi
   const toggleMicrophone = async () => {
     if (!roomRef.current) return;
     const localTracks = roomRef.current.localParticipant.audioTracks;
@@ -241,10 +243,10 @@ export function Platform({ view = 'home' }: { view?: View }) {
       if (publication.track) {
         if (talking) {
           await publication.track.mute();
-          setTalking(false);
+          setTalking(false); // Susturuldu / Dinleme Modu
         } else {
           await publication.track.unmute();
-          setTalking(true);
+          setTalking(true); // Mikrofon Açık / Konuşma Modu
         }
       }
     }
@@ -335,7 +337,8 @@ export function Platform({ view = 'home' }: { view?: View }) {
         .filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')))
         .map(({ item, index }) => {
           const isCurrentRoom = joined && channel === index;
-          const participantCount = isCurrentRoom ? activeParticipants.length : 0;
+          // Eğer bu odadaysak gerçek katılımcı sayısı, değilse varsayılan demo sayısı
+          const displayCount = isCurrentRoom ? activeParticipants.length : item.count;
           
           return (
             <article className={`channel-card ${isCurrentRoom ? 'selected' : ''}`} key={item.name}>
@@ -354,7 +357,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
                   ) : (
                     <Avatar>YD</Avatar>
                   )}
-                  <span><Users size={10} className="inline mr-1" />{participantCount} Sürücü</span>
+                  <span><Users size={10} className="inline mr-1" />{displayCount} Sürücü Odada</span>
                 </div>
                 <Button
                   variant="outline"
@@ -435,7 +438,41 @@ export function Platform({ view = 'home' }: { view?: View }) {
     )}{view === 'roads' && <div className="tools-grid"><BorderPanel expanded /><div className="panel"><h2 className="text-base font-semibold flex items-center gap-2"><Navigation size={18} /> Yol bildirimleri</h2><p className="modal-copy">Bolu Tüneli · İstanbul yönü</p><p>Trafik akıcı, yol açık.</p><p className="modal-copy">TEM · Gebze gişeleri</p><p>Yoğunluk nedeniyle yavaş ilerliyor.</p><div className="demo-label">Örnek sürücü bildirimleri</div></div></div>}{view === 'tools' && <div className="tools-grid"><TimerPanel /><FuelCalculator /></div>}</div>}
     </main>
     
-    <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{initialChannels[channel]?.name}</strong><small><i className="live-dot" />{joined ? `Canlı Odadasın (${activeParticipants.length} Kişi)` : 'Odada Değilsin'}</small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${talking ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Canlı Konferans'}<small>{talking ? 'Mikrofon Açık (Konuşabilirsin)' : 'Susturuldu'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} style={{ background: joined ? (talking ? '#16a34a' : '#dc2626') : '#94a3b8' }} onClick={() => toggleMicrophone()}><Mic size={16} />{joined ? (talking ? 'Mikrofon Açık' : 'Susturuldu') : 'Önce Odaya Katıl'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Oda seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
+    <footer className="radio-dock">
+      <div className="radio-station">
+        <div className="radio-station-icon"><Radio size={23} /></div>
+        <div>
+          <strong>{initialChannels[channel]?.name}</strong>
+          <small><i className="live-dot" />{joined ? `Aktif Kanal (${activeParticipants.length} Sürücü)` : 'Frekans Bekleniyor'}</small>
+        </div>
+      </div>
+      <div className="divider" />
+      <div className="radio-center">
+        <Avatar className="speaker-avatar">YD</Avatar>
+        <div className={`waveform ${talking ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div>
+        <div className="speaker-info">
+          {'Telsiz Tipi Bağlantı'}
+          <small style={{ color: talking ? '#16a34a' : '#eab308' }}>
+            {joined ? (talking ? '🟢 Mikrofon Açık (Konuşuyorsun)' : '🎧 Dinleme Modunda (Susturuldu)') : 'Bağlı Değilsin'}
+          </small>
+        </div>
+      </div>
+      <div className="radio-controls">
+        <Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>
+          {muted ? <VolumeX /> : <Volume2 />}
+        </Button>
+        <input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" />
+        <Button 
+          className={`ptt-button ${talking ? 'talking' : ''}`} 
+          style={{ background: joined ? (talking ? '#16a34a' : '#d97706') : '#94a3b8' }} 
+          onClick={() => toggleMicrophone()}
+        >
+          {talking ? <Mic size={16} /> : <MicOff size={16} />}
+          {joined ? (talking ? 'Bas Konuş (Açık)' : 'Dinle / Sustur') : 'Önce Odaya Katıl'}
+        </Button>
+        <Button variant="ghost" size="icon" className="dock-icon" aria-label="Oda seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button>
+      </div>
+    </footer>
     
     <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Ses Odası Bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Canlı Ses Odası'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni sesli oda aktif.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi sohbet başlığından düzenleyebilirsiniz.</p></div> : dialog === 'radio' ? <>
       <p className="modal-copy">{initialChannels[channel]?.name} · Canlı ses odasındasınız.</p>
@@ -832,5 +869,5 @@ function FuelCalculator() {
   const [consumption, setConsumption] = useState('30');
   const [price, setPrice] = useState('54');
   const result = calculateFuelCost(Number(distance), Number(consumption), Number(price));
-  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChange={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
+  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChangee={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
 }
