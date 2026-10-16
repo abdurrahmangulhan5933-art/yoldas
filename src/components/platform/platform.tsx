@@ -177,7 +177,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
     }
   };
 
-  // Telsiz Sesli Kayıt Başlat/Durdur
+  // Telsiz Sesli Kayıt Başlat ve Supabase Storage'a Yükle
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -195,20 +195,36 @@ export function Platform({ view = 'home' }: { view?: View }) {
         const savedName = localStorage.getItem('yoldas_user_name') || 'Sürücü';
         const savedPlate = localStorage.getItem('yoldas_user_plate') || '34 YLD 01';
         
-        // Ses kaydını base64 veya mesaj metni olarak sohbete ilet
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          const base64Audio = reader.result as string;
-          await supabase.from('radio_messages').insert([
-            {
-              channel_name: channels[channel].name,
-              sender_name: savedName,
-              sender_plate: savedPlate,
-              message: `🎙️ [Sesli Telsiz Mesajı]`,
-            },
-          ]);
-        };
+        // Benzersiz dosya adı oluşturuluyor
+        const fileName = `telsiz_${Date.now()}.webm`;
+        
+        // 1. Supabase Storage (radio-audio bucket) içerisine yükleme
+        const { error: uploadError } = await supabase.storage
+          .from('radio-audio')
+          .upload(fileName, audioBlob);
+
+        if (uploadError) {
+          console.error('Ses yüklenemedi:', uploadError.message);
+          return;
+        }
+
+        // 2. Yüklenen dosyanın genel (public) URL adresini alma
+        const { data: publicURLData } = supabase.storage
+          .from('radio-audio')
+          .getPublicUrl(fileName);
+
+        const audioUrl = publicURLData.publicUrl;
+
+        // 3. Veritabanına ses URL'i ile birlikte mesajı kaydetme
+        await supabase.from('radio_messages').insert([
+          {
+            channel_name: channels[channel].name,
+            sender_name: savedName,
+            sender_plate: savedPlate,
+            message: `🎙️ Sesli Telsiz Mesajı`,
+            audio_url: audioUrl,
+          },
+        ]);
       };
 
       mediaRecorderRef.current.start();
@@ -644,7 +660,11 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
                     </strong>
                     <time style={{ fontSize: '10px', opacity: 0.6 }}>{timeString}</time>
                   </div>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '13px' }}>{item.message}</p>
+                  {item.audio_url ? (
+                    <audio controls src={item.audio_url} style={{ height: '32px', marginTop: '4px', width: '100%' }} />
+                  ) : (
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px' }}>{item.message}</p>
+                  )}
                 </div>
               </div>
             );
