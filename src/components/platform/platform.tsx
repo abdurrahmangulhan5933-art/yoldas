@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowDownUp, ArrowRight, Bell, CalendarDays, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Coffee, Compass, Fuel, Headphones, LayoutGrid, MapPin, Menu, MessageSquare, Mic, MicOff, Moon, MoreHorizontal, Navigation, Newspaper, Pause, Play, Plus, Radio, Search, Send, Settings2, ShieldCheck, Signal, Siren, Truck, Users, Volume2, VolumeX, Wrench, X } from 'lucide-react';
+import { ArrowDownUp, ArrowRight, Bell, CalendarDays, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Coffee, Compass, Fuel, Headphones, LayoutGrid, Lock, MapPin, Menu, MessageSquare, Mic, MicOff, Moon, MoreHorizontal, Navigation, Newspaper, Pause, Play, Plus, Radio, Search, Send, Settings2, ShieldCheck, Signal, Siren, Trash2, Truck, Users, Volume2, VolumeX, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import truckImage from '@/assets/truck-road.jpg';
@@ -46,12 +46,30 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [dialog, setDialog] = useState<'help' | 'notifications' | 'profile' | 'radio' | 'support' | null>(null);
   const [article, setArticle] = useState<any | null>(null);
   const [newsList, setNewsList] = useState<any[]>([]);
+  
+  // Yönetici (Admin) Durumları
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [adminError, setAdminError] = useState('');
+
+  // Haber Ekleme Durumları
   const [showAddNewsModal, setShowAddNewsModal] = useState(false);
   const [newNewsCategory, setNewNewsCategory] = useState('AKARYAKIT');
   const [newNewsTitle, setNewNewsTitle] = useState('');
   const [newNewsBody, setNewNewsBody] = useState('');
+  const [newNewsImageUrl, setNewNewsImageUrl] = useState('');
+
   const [helpSent, setHelpSent] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Yönetici Oturumunu Kontrol Et
+  useEffect(() => {
+    const savedAdmin = localStorage.getItem('yoldas_is_admin');
+    if (savedAdmin === 'true') {
+      setIsAdmin(true);
+    }
+  }, []);
 
   // Canlı Haberleri Çek
   useEffect(() => {
@@ -75,6 +93,25 @@ export function Platform({ view = 'home' }: { view?: View }) {
     }
   };
 
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Yönetici Şifresi: yoldas123
+    if (adminPasswordInput === 'yoldas123') {
+      setIsAdmin(true);
+      localStorage.setItem('yoldas_is_admin', 'true');
+      setShowAdminLoginModal(false);
+      setAdminPasswordInput('');
+      setAdminError('');
+    } else {
+      setAdminError('Hatalı yönetici şifresi!');
+    }
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdmin(false);
+    localStorage.removeItem('yoldas_is_admin');
+  };
+
   const handleCreateNews = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNewsTitle.trim() || !newNewsBody.trim()) return;
@@ -83,14 +120,24 @@ export function Platform({ view = 'home' }: { view?: View }) {
       {
         category: newNewsCategory,
         title: newNewsTitle.trim(),
-        body: newNewsBody.trim()
+        body: newNewsBody.trim(),
+        image_url: newNewsImageUrl.trim() || null
       }
     ]);
 
     if (!error) {
       setNewNewsTitle('');
       setNewNewsBody('');
+      setNewNewsImageUrl('');
       setShowAddNewsModal(false);
+      fetchNews();
+    }
+  };
+
+  const handleDeleteNews = async (id: string) => {
+    if (!confirm('Bu haberi silmek istediğinize emin misiniz?')) return;
+    const { error } = await supabase.from('news').delete().eq('id', id);
+    if (!error) {
       fetchNews();
     }
   };
@@ -105,19 +152,33 @@ export function Platform({ view = 'home' }: { view?: View }) {
         <p className="text-xs text-muted-foreground p-4">Henüz yayınlanmış bir gündem haberi yok.</p>
       ) : (
         newsList.map((item, index) => (
-          <article className="news-card" key={item.id || index}>
+          <article className="news-card" key={item.id || index} style={{ position: 'relative' }}>
             <div className={`news-cover ${index % 2 !== 0 ? 'second' : ''}`}>
-              <img src={truckImage} alt="Yoldaş Haber" width={1600} height={640} loading="lazy" />
+              <img src={item.image_url || truckImage} alt="Yoldaş Haber" width={1600} height={640} loading="lazy" style={{ objectFit: 'cover' }} />
               <span className="news-category">{item.category}</span>
             </div>
             <div className="news-copy">
               <Button variant="ghost" className="h-auto p-0 whitespace-normal text-left justify-start" onClick={() => setArticle(item)}>
                 <h3>{item.title}</h3>
               </Button>
-              <div className="news-meta">
-                <Clock3 size={10} />
-                {item.created_at ? new Date(item.created_at).toLocaleDateString('tr-TR') : 'Şimdi'}
+              <div className="news-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Clock3 size={10} />
+                  {item.created_at ? new Date(item.created_at).toLocaleDateString('tr-TR') : 'Şimdi'}
+                </span>
                 <span className="ml-auto">Yoldaş Editör</span>
+                
+                {/* Yönetici Silme Butonu */}
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteNews(item.id)}
+                    style={{ color: '#ef4444', marginLeft: '8px', padding: '2px 6px' }}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                )}
               </div>
             </div>
           </article>
@@ -134,9 +195,22 @@ export function Platform({ view = 'home' }: { view?: View }) {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <SectionHeading icon={<Newspaper />} title="Yol Gündemi & İndirimler" />
-          <Button onClick={() => setShowAddNewsModal(true)} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <Plus size={16} /> Haber / Duyuru Paylaş
-          </Button>
+          
+          {/* Yönetici Paneli Butonları */}
+          {isAdmin ? (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Button onClick={() => setShowAddNewsModal(true)} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <Plus size={16} /> Haber / Duyuru Ekle
+              </Button>
+              <Button variant="outline" onClick={handleAdminLogout} style={{ fontSize: '11px' }}>
+                Yönetici Çıkışı
+              </Button>
+            </div>
+          ) : (
+            <Button variant="ghost" onClick={() => setShowAdminLoginModal(true)} style={{ fontSize: '11px', opacity: 0.7 }}>
+              <Lock size={12} className="mr-1" /> Yönetici Girişi
+            </Button>
+          )}
         </div>
         {renderNewsCards}
       </div>
@@ -152,12 +226,39 @@ export function Platform({ view = 'home' }: { view?: View }) {
           <DialogTitle>{article?.title}</DialogTitle>
           <DialogDescription>{article?.category} · Yoldaş Editör</DialogDescription>
         </DialogHeader>
-        <img src={truckImage} alt="Uzun yol taşımacılığı" width={1600} height={640} className="rounded-md" />
+        <img src={article?.image_url || truckImage} alt="Uzun yol taşımacılığı" width={1600} height={640} className="rounded-md" style={{ maxHeight: '250px', objectFit: 'cover' }} />
         <p className="modal-copy" style={{ marginTop: '12px', lineHeight: '1.6' }}>{article?.body}</p>
       </DialogContent>
     </Dialog>
 
-    {/* Haber / Duyuru Ekleme Modali */}
+    {/* Yönetici Giriş Modali */}
+    <Dialog open={showAdminLoginModal} onOpenChange={setShowAdminLoginModal}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Yönetici (Admin) Girişi</DialogTitle>
+          <DialogDescription>Yol gündemine içerik eklemek için yönetici şifrenizi girin.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Yönetici Şifresi:</label>
+            <input
+              type="password"
+              required
+              placeholder="Şifrenizi girin"
+              value={adminPasswordInput}
+              onChange={(e) => setAdminPasswordInput(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
+            />
+          </div>
+          {adminError && <p style={{ color: 'red', fontSize: '11px' }}>{adminError}</p>}
+          <Button type="submit" className="w-full mt-2">
+            Giriş Yap
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+
+    {/* Haber / Duyuru Ekleme Modali (Sadece Yönetici Görür) */}
     <Dialog open={showAddNewsModal} onOpenChange={setShowAddNewsModal}>
       <DialogContent>
         <DialogHeader>
@@ -188,6 +289,16 @@ export function Platform({ view = 'home' }: { view?: View }) {
               placeholder="Örn: Motorine 1.5 TL İndirim Geliyor!"
               value={newNewsTitle}
               onChange={(e) => setNewNewsTitle(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Kapak Resmi Bağlantısı (İsteğe Bağlı URL):</label>
+            <input
+              type="url"
+              placeholder="https://örnek.com/resim.jpg (Boş bırakırsanız varsayılan resim kullanılır)"
+              value={newNewsImageUrl}
+              onChange={(e) => setNewNewsImageUrl(e.target.value)}
               style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
             />
           </div>
