@@ -47,11 +47,12 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [article, setArticle] = useState<any | null>(null);
   const [newsList, setNewsList] = useState<any[]>([]);
   
-  // Yönetici (Admin) Durumları
+  // Gizli Yönetici (Admin) Durumları
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminError, setAdminError] = useState('');
+  const [secretClickCount, setSecretClickCount] = useState(0);
 
   // Haber Ekleme Durumları
   const [showAddNewsModal, setShowAddNewsModal] = useState(false);
@@ -59,6 +60,8 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [newNewsTitle, setNewNewsTitle] = useState('');
   const [newNewsBody, setNewNewsBody] = useState('');
   const [newNewsImageUrl, setNewNewsImageUrl] = useState('');
+  const [newsSubmitError, setNewsSubmitError] = useState('');
+  const [isSubmittingNews, setIsSubmittingNews] = useState(false);
 
   const [helpSent, setHelpSent] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -69,6 +72,16 @@ export function Platform({ view = 'home' }: { view?: View }) {
     if (savedAdmin === 'true') {
       setIsAdmin(true);
     }
+
+    // Gizli Klavye Kısayolu: Ctrl + Shift + A ile Yönetici Girişi Açılır
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setShowAdminLoginModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Canlı Haberleri Çek
@@ -95,7 +108,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Yönetici Şifresi: yoldas123
     if (adminPasswordInput === 'yoldas123') {
       setIsAdmin(true);
       localStorage.setItem('yoldas_is_admin', 'true');
@@ -112,20 +124,42 @@ export function Platform({ view = 'home' }: { view?: View }) {
     localStorage.removeItem('yoldas_is_admin');
   };
 
+  const handleSecretClick = () => {
+    const nextCount = secretClickCount + 1;
+    if (nextCount >= 3) {
+      setShowAdminLoginModal(true);
+      setSecretClickCount(0);
+    } else {
+      setSecretClickCount(nextCount);
+    }
+  };
+
   const handleCreateNews = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNewsTitle.trim() || !newNewsBody.trim()) return;
 
-    const { error } = await supabase.from('news').insert([
-      {
-        category: newNewsCategory,
-        title: newNewsTitle.trim(),
-        body: newNewsBody.trim(),
-        image_url: newNewsImageUrl.trim() || null
-      }
-    ]);
+    setIsSubmittingNews(true);
+    setNewsSubmitError('');
 
-    if (!error) {
+    // Sadece mevcut sütunları ve varsa image_url'i gönderiyoruz
+    const payload: any = {
+      category: newNewsCategory,
+      title: newNewsTitle.trim(),
+      body: newNewsBody.trim(),
+    };
+
+    if (newNewsImageUrl.trim()) {
+      payload.image_url = newNewsImageUrl.trim();
+    }
+
+    const { error } = await supabase.from('news').insert([payload]);
+
+    setIsSubmittingNews(false);
+
+    if (error) {
+      console.error('Haber eklenirken hata oluştu:', error.message);
+      setNewsSubmitError(`Haber yayınlanamadı: ${error.message}`);
+    } else {
       setNewNewsTitle('');
       setNewNewsBody('');
       setNewNewsImageUrl('');
@@ -190,14 +224,14 @@ export function Platform({ view = 'home' }: { view?: View }) {
   return <div className="app-shell">
     <aside className="sidebar"><Link to="/" className="brand"><span className="brand-mark"><Truck size={24} /></span><span className="brand-name">yoldaş<small>YOLUN AÇIK, TELSİZİN AÇIK.</small></span></Link><nav aria-label="Ana menü"><div className="nav-label">YOL ARKADAŞIN</div>{navigation.map(item => <Link key={item.to} to={item.to} className={`nav-link ${view === item.view ? 'active' : ''}`}><item.icon /><span>{item.label}</span>{item.view === 'messages' && <span className="nav-count">3</span>}</Link>)}</nav><div className="nav-label">FAVORİ KANALLARIN</div><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(0)}><i className="live-dot" />E-5 / TEM Hattı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(1)}><i className="live-dot" />Kapıkule Sınır Kapısı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(3)}><i className="live-dot" />Gece Sürüşü</Link><div className="sidebar-bottom"><div className="help-box"><strong className="flex gap-2 items-center"><Siren size={16} className="text-warning" />Yolda yalnız değilsin.</strong><p>Bir el uzakta, binlerce yoldaş yanında.</p><Button variant="outline" className="w-full h-8 text-[10px]" onClick={() => { setHelpSent(''); setDialog('help'); }}>Dayanışma çağrısı<ArrowRight size={12} /></Button></div><Button variant="ghost" className="w-full text-muted-foreground justify-start text-[11px]" onClick={() => setDialog('support')}><CircleHelp size={15} /> Yardım & Destek</Button><div className="profile"><Avatar>YD</Avatar><div><strong className="text-[11px]">Sürücü Profili</strong><small className="flex items-center gap-1"><ShieldCheck size={10} /> Onaylı sürücü</small></div><Button variant="ghost" size="icon" aria-label="Profil seçenekleri" onClick={() => setDialog('profile')}><ChevronDown size={14} /></Button></div></div></aside>
     <header className="topbar"><div className="breadcrumb"><Truck size={14} /><ChevronRight size={11} /><strong>{view === 'home' ? 'Genel Bakış' : pageTitles[view][0]}</strong></div><div className="top-actions"><label className="search-box"><Search size={14} className="text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="Kanal, konu veya yol arkadaşı ara..." aria-label="Kanal ara" /><kbd>⌘ K</kbd></label><span className="connection"><i className="live-dot" />1.248 sürücü yolda</span><Button variant="ghost" size="icon" className="notification" aria-label="Bildirimler" onClick={() => setDialog('notifications')}><Bell size={17} /></Button></div></header>
-    <main className="page-content content-page" key={view}><div className="page-heading"><div><h1>{pageTitles[view][0]}</h1><p>{pageTitles[view][1]}</p></div><span className="date-label"><CalendarDays size={13} />16 Ekim 2026, Cuma</span></div>
+    <main className="page-content content-page" key={view}><div className="page-heading"><div><h1>{pageTitles[view][0]}</h1><p>{pageTitles[view][1]}</p></div><span className="date-label" onClick={handleSecretClick} style={{ cursor: 'pointer', userSelect: 'none' }} title="Yoldaş v1.0"><CalendarDays size={13} />16 Ekim 2026, Cuma</span></div>
     {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Telsize bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı telsiz kanalları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Örnek kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel />}{view === 'news' && (
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <SectionHeading icon={<Newspaper />} title="Yol Gündemi & İndirimler" />
           
-          {/* Yönetici Paneli Butonları */}
-          {isAdmin ? (
+          {/* Sadece Yönetici Giriş Yaptığında Buton Görünür */}
+          {isAdmin && (
             <div style={{ display: 'flex', gap: '8px' }}>
               <Button onClick={() => setShowAddNewsModal(true)} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <Plus size={16} /> Haber / Duyuru Ekle
@@ -206,10 +240,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
                 Yönetici Çıkışı
               </Button>
             </div>
-          ) : (
-            <Button variant="ghost" onClick={() => setShowAdminLoginModal(true)} style={{ fontSize: '11px', opacity: 0.7 }}>
-              <Lock size={12} className="mr-1" /> Yönetici Girişi
-            </Button>
           )}
         </div>
         {renderNewsCards}
@@ -231,11 +261,11 @@ export function Platform({ view = 'home' }: { view?: View }) {
       </DialogContent>
     </Dialog>
 
-    {/* Yönetici Giriş Modali */}
+    {/* Gizli Yönetici Giriş Modali */}
     <Dialog open={showAdminLoginModal} onOpenChange={setShowAdminLoginModal}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Yönetici (Admin) Girişi</DialogTitle>
+          <DialogTitle>Yönetici Panel Girişi</DialogTitle>
           <DialogDescription>Yol gündemine içerik eklemek için yönetici şifrenizi girin.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
@@ -313,8 +343,13 @@ export function Platform({ view = 'home' }: { view?: View }) {
               style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
             />
           </div>
-          <Button type="submit" className="w-full mt-2">
-            Gündemi Yayınla
+
+          {newsSubmitError && (
+            <p style={{ color: 'red', fontSize: '11px', marginTop: '4px' }}>{newsSubmitError}</p>
+          )}
+
+          <Button type="submit" disabled={isSubmittingNews} className="w-full mt-2">
+            {isSubmittingNews ? 'Yayınlanıyor...' : 'Gündemi Yayınla'}
           </Button>
         </form>
       </DialogContent>
