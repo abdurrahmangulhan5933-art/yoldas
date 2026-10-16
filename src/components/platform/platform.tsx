@@ -16,6 +16,7 @@ const navigation = [
   { to: '/yol-durumu', label: 'Yol & Sınır Durumu', icon: MapPin, view: 'roads' },
   { to: '/araclar', label: 'Pratik Araçlar', icon: Wrench, view: 'tools' },
 ] as const;
+
 const channels = [
   { name: 'E-5 / TEM Hattı', subtitle: 'Yolun nabzı burada atıyor.', count: 128, icon: Navigation, tone: '', initials: ['MK', 'AY', 'HD'] },
   { name: 'Kapıkule Sınır Kapısı', subtitle: 'Sınırdan en güncel bilgiler.', count: 84, icon: Truck, tone: 'green', initials: ['İK', 'SA', 'MT'] },
@@ -63,17 +64,20 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [newsSubmitError, setNewsSubmitError] = useState('');
   const [isSubmittingNews, setIsSubmittingNews] = useState(false);
 
+  // Telsiz Kayıt Durumları
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   const [helpSent, setHelpSent] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Yönetici Oturumunu Kontrol Et
   useEffect(() => {
     const savedAdmin = localStorage.getItem('yoldas_is_admin');
     if (savedAdmin === 'true') {
       setIsAdmin(true);
     }
 
-    // Gizli Klavye Kısayolu: Ctrl + Shift + A ile Yönetici Girişi Açılır
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
@@ -84,7 +88,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Canlı Haberleri Çek
   useEffect(() => {
     fetchNews();
     const newsChannel = supabase
@@ -141,7 +144,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
     setIsSubmittingNews(true);
     setNewsSubmitError('');
 
-    // Sadece mevcut sütunları ve varsa image_url'i gönderiyoruz
     const payload: any = {
       category: newNewsCategory,
       title: newNewsTitle.trim(),
@@ -157,7 +159,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
     setIsSubmittingNews(false);
 
     if (error) {
-      console.error('Haber eklenirken hata oluştu:', error.message);
       setNewsSubmitError(`Haber yayınlanamadı: ${error.message}`);
     } else {
       setNewNewsTitle('');
@@ -176,9 +177,95 @@ export function Platform({ view = 'home' }: { view?: View }) {
     }
   };
 
+  // Telsiz Sesli Kayıt Başlat/Durdur
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const savedName = localStorage.getItem('yoldas_user_name') || 'Sürücü';
+        const savedPlate = localStorage.getItem('yoldas_user_plate') || '34 YLD 01';
+        
+        // Ses kaydını base64 veya mesaj metni olarak sohbete ilet
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+          await supabase.from('radio_messages').insert([
+            {
+              channel_name: channels[channel].name,
+              sender_name: savedName,
+              sender_plate: savedPlate,
+              message: `🎙️ [Sesli Telsiz Mesajı]`,
+            },
+          ]);
+        };
+      };
+
+      mediaRecorderRef.current.start();
+      setTalking(true);
+      setRecording(true);
+    } catch (err) {
+      console.error('Mikrofon erişim hatası:', err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      setTalking(false);
+      setRecording(false);
+    }
+  };
+
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
-  const selectChannel = (index: number) => { setChannel(index); setJoined(true); setTalking(false); };
-  const channelCards = (all = false) => <div className="channel-grid">{channels.slice(0, all ? channels.length : 4).map((item, index) => ({ item, index })).filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr'))).map(({ item, index }) => <article className={`channel-card ${joined && channel === index ? 'selected' : ''}`} key={item.name}><div className="channel-top"><div className={`channel-icon ${item.tone}`}><item.icon size={17} /></div><span className="live-tag"><i className="live-dot" />CANLI</span></div><h3>{item.name}</h3><p>{item.subtitle}</p><div className="channel-footer"><div className="avatars">{item.initials.map(initial => <Avatar key={initial}>{initial}</Avatar>)}<span><Users size={10} className="inline mr-1" />{item.count}</span></div><Button variant="outline" className={`join-button ${joined && channel === index ? 'joined' : ''}`} onClick={() => selectChannel(index)}>{joined && channel === index ? <><Signal size={12} /> Bağlısın</> : <><Headphones size={12} /> Kanala katıl</>}</Button></div></article>)}</div>;
+  
+  const selectChannel = (index: number) => {
+    setChannel(index);
+    setJoined(true);
+  };
+
+  const channelCards = (all = false) => (
+    <div className="channel-grid">
+      {channels
+        .slice(0, all ? channels.length : 4)
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')))
+        .map(({ item, index }) => (
+          <article className={`channel-card ${joined && channel === index ? 'selected' : ''}`} key={item.name}>
+            <div className="channel-top">
+              <div className={`channel-icon ${item.tone}`}><item.icon size={17} /></div>
+              <span className="live-tag"><i className="live-dot" />CANLI</span>
+            </div>
+            <h3>{item.name}</h3>
+            <p>{item.subtitle}</p>
+            <div className="channel-footer">
+              <div className="avatars">
+                {item.initials.map(initial => <Avatar key={initial}>{initial}</Avatar>)}
+                <span><Users size={10} className="inline mr-1" />{item.count}</span>
+              </div>
+              <Button
+                variant="outline"
+                className={`join-button ${joined && channel === index ? 'joined' : ''}`}
+                onClick={() => selectChannel(index)}
+              >
+                {joined && channel === index ? <><Signal size={12} /> Bağlısın</> : <><Headphones size={12} /> Kanala katıl</>}
+              </Button>
+            </div>
+          </article>
+        ))}
+    </div>
+  );
 
   const renderNewsCards = (
     <div className="news-grid">
@@ -202,7 +289,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
                 </span>
                 <span className="ml-auto">Yoldaş Editör</span>
                 
-                {/* Yönetici Silme Butonu */}
                 {isAdmin && (
                   <Button
                     variant="ghost"
@@ -225,12 +311,10 @@ export function Platform({ view = 'home' }: { view?: View }) {
     <aside className="sidebar"><Link to="/" className="brand"><span className="brand-mark"><Truck size={24} /></span><span className="brand-name">yoldaş<small>YOLUN AÇIK, TELSİZİN AÇIK.</small></span></Link><nav aria-label="Ana menü"><div className="nav-label">YOL ARKADAŞIN</div>{navigation.map(item => <Link key={item.to} to={item.to} className={`nav-link ${view === item.view ? 'active' : ''}`}><item.icon /><span>{item.label}</span>{item.view === 'messages' && <span className="nav-count">3</span>}</Link>)}</nav><div className="nav-label">FAVORİ KANALLARIN</div><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(0)}><i className="live-dot" />E-5 / TEM Hattı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(1)}><i className="live-dot" />Kapıkule Sınır Kapısı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(3)}><i className="live-dot" />Gece Sürüşü</Link><div className="sidebar-bottom"><div className="help-box"><strong className="flex gap-2 items-center"><Siren size={16} className="text-warning" />Yolda yalnız değilsin.</strong><p>Bir el uzakta, binlerce yoldaş yanında.</p><Button variant="outline" className="w-full h-8 text-[10px]" onClick={() => { setHelpSent(''); setDialog('help'); }}>Dayanışma çağrısı<ArrowRight size={12} /></Button></div><Button variant="ghost" className="w-full text-muted-foreground justify-start text-[11px]" onClick={() => setDialog('support')}><CircleHelp size={15} /> Yardım & Destek</Button><div className="profile"><Avatar>YD</Avatar><div><strong className="text-[11px]">Sürücü Profili</strong><small className="flex items-center gap-1"><ShieldCheck size={10} /> Onaylı sürücü</small></div><Button variant="ghost" size="icon" aria-label="Profil seçenekleri" onClick={() => setDialog('profile')}><ChevronDown size={14} /></Button></div></div></aside>
     <header className="topbar"><div className="breadcrumb"><Truck size={14} /><ChevronRight size={11} /><strong>{view === 'home' ? 'Genel Bakış' : pageTitles[view][0]}</strong></div><div className="top-actions"><label className="search-box"><Search size={14} className="text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="Kanal, konu veya yol arkadaşı ara..." aria-label="Kanal ara" /><kbd>⌘ K</kbd></label><span className="connection"><i className="live-dot" />1.248 sürücü yolda</span><Button variant="ghost" size="icon" className="notification" aria-label="Bildirimler" onClick={() => setDialog('notifications')}><Bell size={17} /></Button></div></header>
     <main className="page-content content-page" key={view}><div className="page-heading"><div><h1>{pageTitles[view][0]}</h1><p>{pageTitles[view][1]}</p></div><span className="date-label" onClick={handleSecretClick} style={{ cursor: 'pointer', userSelect: 'none' }} title="Yoldaş v1.0"><CalendarDays size={13} />16 Ekim 2026, Cuma</span></div>
-    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Telsize bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı telsiz kanalları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Örnek kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel />}{view === 'news' && (
+    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Telsize bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı telsiz kanalları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact channelName={channels[channel]?.name} /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Aktif Kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel channelName={channels[channel]?.name} />}{view === 'news' && (
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <SectionHeading icon={<Newspaper />} title="Yol Gündemi & İndirimler" />
-          
-          {/* Sadece Yönetici Giriş Yaptığında Buton Görünür */}
           {isAdmin && (
             <div style={{ display: 'flex', gap: '8px' }}>
               <Button onClick={() => setShowAddNewsModal(true)} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -246,10 +330,9 @@ export function Platform({ view = 'home' }: { view?: View }) {
       </div>
     )}{view === 'roads' && <div className="tools-grid"><BorderPanel expanded /><div className="panel"><h2 className="text-base font-semibold flex items-center gap-2"><Navigation size={18} /> Yol bildirimleri</h2><p className="modal-copy">Bolu Tüneli · İstanbul yönü</p><p>Trafik akıcı, yol açık.</p><p className="modal-copy">TEM · Gebze gişeleri</p><p>Yoğunluk nedeniyle yavaş ilerliyor.</p><div className="demo-label">Örnek sürücü bildirimleri</div></div></div>}{view === 'tools' && <div className="tools-grid"><TimerPanel /><FuelCalculator /></div>}</div>}
     </main>
-    <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{channels[channel]?.name}</strong><small><i className="live-dot" />{joined ? 'Kanala bağlısın' : 'Bağlantı kapalı'}<span className="text-muted-foreground"> · Önizleme</span></small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${joined ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Sürücü Telsizi'}<small>{talking ? 'Mikrofon açık' : 'Dinlemede'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} disabled={!joined} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setTalking(true); }} onPointerUp={() => setTalking(false)} onPointerCancel={() => setTalking(false)}><Mic size={16} />{talking ? 'Konuşuyorsun' : 'Basılı tut, konuş'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Telsiz seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
-    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Telsiz bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Etkileşimli önizleme'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni yol bildirimleri var.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi buradan güncelleyebilirsiniz.</p></div> : dialog === 'radio' ? <><p className="modal-copy">{channels[channel]?.name} · Telsiz kanalındasınız.</p><Button variant="outline" onClick={() => { setJoined(!joined); setTalking(false); setDialog(null); }}>{joined ? <><X />Kanaldan ayrıl</> : <><Radio />Yeniden katıl</>}</Button></> : <p className="modal-copy">Yoldaş nakliye ve iletişim platformu.</p>}</DialogContent></Dialog>
+    <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{channels[channel]?.name}</strong><small><i className="live-dot" />{joined ? 'Kanala bağlısın' : 'Bağlantı kapalı'}</small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${talking ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Sürücü Telsizi'}<small>{talking ? 'Mikrofon Açık (Konuşuyorsun)' : 'Dinlemede'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} disabled={!joined} onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording}><Mic size={16} />{talking ? 'Konuşuyorsun...' : 'Basılı tut, konuş'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Telsiz seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
+    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Telsiz bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Etkileşimli önizleme'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni yol bildirimleri var.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi sohbet başlığından düzenleyebilirsiniz.</p></div> : dialog === 'radio' ? <><p className="modal-copy">{channels[channel]?.name} · Telsiz kanalındasınız.</p><Button variant="outline" onClick={() => { setJoined(!joined); setTalking(false); setDialog(null); }}>{joined ? <><X />Kanaldan ayrıl</> : <><Radio />Yeniden katıl</>}</Button></> : <p className="modal-copy">Yoldaş nakliye ve iletişim platformu.</p>}</DialogContent></Dialog>
     
-    {/* Haber Detay Modali */}
     <Dialog open={article !== null} onOpenChange={open => { if (!open) setArticle(null); }}>
       <DialogContent>
         <DialogHeader>
@@ -261,7 +344,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
       </DialogContent>
     </Dialog>
 
-    {/* Gizli Yönetici Giriş Modali */}
     <Dialog open={showAdminLoginModal} onOpenChange={setShowAdminLoginModal}>
       <DialogContent>
         <DialogHeader>
@@ -288,7 +370,6 @@ export function Platform({ view = 'home' }: { view?: View }) {
       </DialogContent>
     </Dialog>
 
-    {/* Haber / Duyuru Ekleme Modali (Sadece Yönetici Görür) */}
     <Dialog open={showAddNewsModal} onOpenChange={setShowAddNewsModal}>
       <DialogContent>
         <DialogHeader>
@@ -425,19 +506,13 @@ function TimerPanel() {
   return <section className="panel timer-panel"><div className="panel-title"><h2><Clock3 className="text-primary" />Sürüş asistanı</h2><span className="subtle-label">Sayaç</span></div><div className="timer-display">{time.hours}<span>:</span>{time.minutes}<span>:</span>{time.seconds}</div><span className="timer-caption">Planlanan kalan sürüş süresi</span><div className="progress-track" /><div className="timer-scale"><span>00:00</span><span>04:30</span></div><div className="break-note"><Coffee size={12} />Sıradaki molan: <strong>45 dakika</strong></div><Button variant="outline" className="timer-button" onClick={() => setRunning(!running)}>{running ? <Pause size={12} /> : <Play size={12} />}{running ? 'Sayacı duraklat' : 'Sayacı başlat'}</Button><div className="demo-label">Resmî takograf yerine geçmez.</div></section>;
 }
 
-function ChatPanel({ compact = false }: { compact?: boolean }) {
+function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { compact?: boolean; channelName?: string }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [message, setMessage] = useState('');
   const [userName, setUserName] = useState('');
   const [userPlate, setUserPlate] = useState('');
   const [isProfileSet, setIsProfileSet] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [recordError, setRecordError] = useState('');
-  const [audioMessages, setAudioMessages] = useState<string[]>([]);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const urls = useRef<string[]>([]);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -471,7 +546,7 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [channelName]);
 
   const fetchMessages = async () => {
     const { data, error } = await supabase
@@ -494,45 +569,6 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
     setShowProfileModal(false);
   };
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-    recorder.current?.stream.getTracks().forEach((t) => t.stop());
-    urls.current.forEach((url) => URL.revokeObjectURL(url));
-  }, []);
-
-  const record = async () => {
-    if (recording) {
-      recorder.current?.stop();
-      if (timer.current) clearTimeout(timer.current);
-      return;
-    }
-    setRecordError('');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const media = new MediaRecorder(stream);
-      recorder.current = media;
-      const chunks: BlobPart[] = [];
-      media.ondataavailable = (event) => {
-        if (event.data.size) chunks.push(event.data);
-      };
-      media.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        setRecording(false);
-        const url = URL.createObjectURL(new Blob(chunks, { type: media.mimeType }));
-        urls.current.push(url);
-        setAudioMessages((previous) => [...previous, url]);
-      };
-      media.start();
-      setRecording(true);
-      timer.current = setTimeout(() => {
-        if (media.state === 'recording') media.stop();
-      }, 10000);
-    } catch {
-      setRecording(false);
-      setRecordError('Mikrofon açılamadı. Tarayıcının mikrofon iznini kontrol et.');
-    }
-  };
-
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
@@ -547,7 +583,7 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
 
     const { error } = await supabase.from('radio_messages').insert([
       {
-        channel_name: 'E-5 / TEM Hattı',
+        channel_name: channelName,
         sender_name: userName,
         sender_plate: userPlate,
         message: msgText,
@@ -566,7 +602,7 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
       <div className="chat-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>
           <MessageSquare className="text-blue" />
-          Genel sohbet
+          {channelName} Sohbeti
         </h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '11px', opacity: 0.8 }}>● Canlı ({messages.length})</span>
@@ -614,50 +650,23 @@ function ChatPanel({ compact = false }: { compact?: boolean }) {
             );
           })
         )}
-
-        {audioMessages.map((url) => (
-          <div className="chat-message" key={url}>
-            <Avatar>{userName ? userName.slice(0, 2).toUpperCase() : 'YD'}</Avatar>
-            <div className="message-body">
-              <div className="message-author">
-                <strong>{userName || 'Sürücü'} · Sen</strong>
-              </div>
-              <audio controls src={url} className="w-full h-9 mt-2" aria-label="Sesli mesajın" />
-            </div>
-          </div>
-        ))}
         <div ref={chatEnd} />
       </div>
 
       <form className="chat-form" onSubmit={sendMessage}>
         <input
-          placeholder={isProfileSet ? `${userName} olarak mesaj yaz...` : 'Mesaj yazmak için profilini oluştur...'}
+          placeholder={isProfileSet ? `${userName} olarak ${channelName} kanalına yaz...` : 'Mesaj yazmak için profilini oluştur...'}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           aria-label="Mesajın"
         />
-        <Button
-          type="button"
-          variant="ghost"
-          aria-label={recording ? 'Kaydı durdur' : 'Sesli mesaj kaydet'}
-          onClick={record}
-          className={recording ? 'text-destructive' : 'text-muted-foreground'}
-        >
-          <Mic size={13} />
-        </Button>
         <Button type="submit" variant="ghost" className="text-primary" aria-label="Mesaj gönder">
           <Send size={13} />
         </Button>
       </form>
 
-      {recordError && (
-        <p role="alert" className="text-destructive text-[10px] mt-2">
-          {recordError}
-        </p>
-      )}
-      <div className="demo-label">{compact ? 'Canlı tır sohbet hattı' : 'Tüm yoldaşlarla ortak frekans'}</div>
+      <div className="demo-label">{compact ? 'Canlı tır sohbet hattı' : `${channelName} ortak frekansı`}</div>
 
-      {/* Sürücü Kimliği Belirleme Modali */}
       <Dialog open={showProfileModal} onOpenChange={setShowProfileModal}>
         <DialogContent>
           <DialogHeader>
