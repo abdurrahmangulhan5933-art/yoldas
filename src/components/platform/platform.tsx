@@ -38,6 +38,76 @@ const pageTitles: Record<View, [string, string]> = {
 function Avatar({ children, className = '' }: { children: ReactNode; className?: string }) { return <span className={`avatar ${className}`}>{children}</span>; }
 function SectionHeading({ icon, title, count, to, action = 'Tümünü gör' }: { icon: ReactNode; title: string; count?: string; to?: '/' | '/telsiz' | '/gundem' | '/yol-durumu'; action?: string }) { return <div className="section-heading"><h2>{icon}{title}{count && <span className="count">{count}</span>}</h2>{to && <Link to={to} className="text-action">{action}<ArrowRight /></Link>}</div>; }
 
+// Doğru Süre Hesaplayan Telsiz Ses Oynatıcı Bileşeni
+function AudioPlayer({ src }: { src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState('0:00');
+  const [currentTime, setCurrentTime] = useState('0:00');
+  const [progress, setProgress] = useState(0);
+
+  const formatTime = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const remainingSecs = Math.floor(secs % 60);
+    return `${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', background: '#f1f5f9', padding: '6px 10px', borderRadius: '8px', width: '100%', maxWidth: '240px' }}>
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={() => {
+          if (audioRef.current && isFinite(audioRef.current.duration)) {
+            setDuration(formatTime(audioRef.current.duration));
+          }
+        }}
+        onTimeUpdate={() => {
+          if (audioRef.current && isFinite(audioRef.current.duration)) {
+            const current = audioRef.current.currentTime;
+            const total = audioRef.current.duration;
+            setCurrentTime(formatTime(current));
+            setProgress((current / total) * 100);
+          }
+        }}
+        onEnded={() => setIsPlaying(false)}
+      />
+      
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={togglePlay}
+        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#2563eb', color: '#fff', flexShrink: 0 }}
+      >
+        {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+      </Button>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <div style={{ width: '100%', background: '#cbd5e1', height: '4px', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
+          <div style={{ width: `${progress}%`, background: '#2563eb', height: '100%' }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b' }}>
+          <span>{currentTime}</span>
+          <span>{duration}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Platform({ view = 'home' }: { view?: View }) {
   const [channel, setChannel] = useState(0);
   const [joined, setJoined] = useState(true);
@@ -544,7 +614,6 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
     }
     fetchMessages();
 
-    // Sayfa yenilemeye gerek kalmadan anlık (Realtime) mesaj ve ses akışı
     const messageChannel = supabase
       .channel(`room_${channelName}`)
       .on(
@@ -667,7 +736,7 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
                     <time style={{ fontSize: '10px', opacity: 0.6 }}>{timeString}</time>
                   </div>
                   {item.audio_url ? (
-                    <audio controls src={item.audio_url} style={{ height: '32px', marginTop: '4px', width: '100%' }} />
+                    <AudioPlayer src={item.audio_url} />
                   ) : (
                     <p style={{ margin: '4px 0 0 0', fontSize: '13px' }}>{item.message}</p>
                   )}
@@ -739,5 +808,5 @@ function FuelCalculator() {
   const [consumption, setConsumption] = useState('30');
   const [price, setPrice] = useState('54');
   const result = calculateFuelCost(Number(distance), Number(consumption), Number(price));
-  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChange={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value= {price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
+  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChange={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
 }
