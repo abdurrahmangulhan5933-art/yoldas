@@ -544,8 +544,9 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
     }
     fetchMessages();
 
-    const channel = supabase
-      .channel('schema-db-changes')
+    // Sayfa yenilemeye gerek kalmadan anlık (Realtime) mesaj ve ses akışı
+    const messageChannel = supabase
+      .channel(`room_${channelName}`)
       .on(
         'postgres_changes',
         {
@@ -554,14 +555,19 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
           table: 'radio_messages',
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
-          setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+          if (payload.new.channel_name === channelName) {
+            setMessages((prev) => {
+              if (prev.some((msg) => msg.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+            setTimeout(() => chatEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+          }
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(messageChannel);
     };
   }, [channelName]);
 
@@ -569,6 +575,7 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
     const { data, error } = await supabase
       .from('radio_messages')
       .select('*')
+      .eq('channel_name', channelName)
       .order('created_at', { ascending: true });
 
     if (!error && data) {
@@ -609,8 +616,6 @@ function ChatPanel({ compact = false, channelName = 'E-5 / TEM Hattı' }: { comp
 
     if (error) {
       console.error('Mesaj gönderilemedi:', error.message);
-    } else {
-      fetchMessages();
     }
   };
 
@@ -734,5 +739,5 @@ function FuelCalculator() {
   const [consumption, setConsumption] = useState('30');
   const [price, setPrice] = useState('54');
   const result = calculateFuelCost(Number(distance), Number(consumption), Number(price));
-  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChange={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
+  return <section className="panel"><div className="panel-title"><h2><Fuel className="text-warning" />Yakıt & rota maliyeti</h2></div><label className="field-label">Mesafe (km)<input type="number" min="0" value={distance} onChange={e => setDistance(e.target.value)} /></label><label className="field-label">Ortalama tüketim (L / 100 km)<input type="number" min="0" step="0.1" value={consumption} onChange={e => setConsumption(e.target.value)} /></label><label className="field-label">Motorin litre fiyatı (₺)<input type="number" min="0" step="0.01" value= {price} onChange={e => setPrice(e.target.value)} /></label><div className="result-box"><small>Tahmini yakıt maliyeti · {result?.liters.toLocaleString('tr-TR')} litre</small>{result ? result.cost.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : 'Geçerli değerler girin'}</div><p className="demo-label">Geçiş ücretleri hariçtir. Fiyat örnektir, güncel pompa fiyatını gir.</p></section>;
 }
