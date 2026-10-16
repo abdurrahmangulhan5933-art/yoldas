@@ -6,7 +6,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import truckImage from '@/assets/truck-road.jpg';
 import { calculateFuelCost, formatCountdown } from '@/lib/driver-tools';
 import { supabase } from '../../supabase';
-import { Room, RoomEvent, createLocalAudioTrack } from 'livekit-client';
+import { getLiveKitToken } from '../../lib/livekit-actions';
+import { Room, RoomEvent, createLocalAudioTrack, RemoteParticipant, RemoteTrackPublication, RemoteTrack } from 'livekit-client';
 
 export type View = 'home' | 'radio' | 'messages' | 'news' | 'roads' | 'tools';
 const navigation = [
@@ -18,13 +19,13 @@ const navigation = [
   { to: '/araclar', label: 'Pratik Araçlar', icon: Wrench, view: 'tools' },
 ] as const;
 
-const channels = [
-  { name: 'E-5 / TEM Hattı', subtitle: 'Yolun nabzı burada atıyor.', count: 128, icon: Navigation, tone: '', initials: ['MK', 'AY', 'HD'] },
-  { name: 'Kapıkule Sınır Kapısı', subtitle: 'Sınırdan en güncel bilgiler.', count: 84, icon: Truck, tone: 'green', initials: ['İK', 'SA', 'MT'] },
-  { name: 'Avrupa Rotaları', subtitle: 'Uzak yollar, yakın dostluklar.', count: 63, icon: Compass, tone: '', initials: ['AK', 'BD', 'EY'] },
-  { name: 'Gece Sürüşü', subtitle: 'Geceye birlikte yol alıyoruz.', count: 42, icon: Moon, tone: 'amber', initials: ['YS', 'ÖK', 'TA'] },
-  { name: 'Anadolu Yolları', subtitle: 'Memleketin dört bir yanından.', count: 36, icon: MapPin, tone: 'green', initials: ['AB', 'FK', 'HD'] },
-  { name: 'Mola Yeri Sohbetleri', subtitle: 'Çaylar hazır, sohbet koyu.', count: 27, icon: Coffee, tone: 'amber', initials: ['KT', 'GA', 'SK'] },
+const initialChannels = [
+  { name: 'E-5 / TEM Hattı', subtitle: 'Yolun nabzı burada atıyor.', icon: Navigation, tone: '' },
+  { name: 'Kapıkule Sınır Kapısı', subtitle: 'Sınırdan en güncel bilgiler.', icon: Truck, tone: 'green' },
+  { name: 'Avrupa Rotaları', subtitle: 'Uzak yollar, yakın dostluklar.', icon: Compass, tone: '' },
+  { name: 'Gece Sürüşü', subtitle: 'Geceye birlikte yol alıyoruz.', icon: Moon, tone: 'amber' },
+  { name: 'Anadolu Yolları', subtitle: 'Memleketin dört bir yanından.', icon: MapPin, tone: 'green' },
+  { name: 'Mola Yeri Sohbetleri', subtitle: 'Çaylar hazır, sohbet koyu.', icon: Coffee, tone: 'amber' },
 ];
 
 const pageTitles: Record<View, [string, string]> = {
@@ -97,6 +98,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [dialog, setDialog] = useState<'help' | 'notifications' | 'profile' | 'radio' | 'support' | null>(null);
   const [article, setArticle] = useState<any | null>(null);
   const [newsList, setNewsList] = useState<any[]>([]);
+  const [activeParticipants, setActiveParticipants] = useState<string[]>([]);
 
   const roomRef = useRef<Room | null>(null);
   const audioContainerRef = useRef<HTMLDivElement>(null);
@@ -148,6 +150,17 @@ export function Platform({ view = 'home' }: { view?: View }) {
     };
   }, []);
 
+  const updateParticipantsList = (room: Room) => {
+    const names: string[] = [];
+    if (room.localParticipant) {
+      names.push(room.localParticipant.identity || 'Ben');
+    }
+    room.remoteParticipants.forEach((p) => {
+      if (p.identity) names.push(p.identity);
+    });
+    setActiveParticipants(names);
+  };
+
   const toggleLiveVoiceRoom = async (channelIndex: number) => {
     setChannel(channelIndex);
 
@@ -158,31 +171,66 @@ export function Platform({ view = 'home' }: { view?: View }) {
       }
       setJoined(false);
       setTalking(false);
+      setActiveParticipants([]);
       return;
     }
 
     try {
-      const room = new Room();
+      const channelObj = initialChannels[channelIndex];
+      const roomName = channelObj.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      
+      let userName = localStorage.getItem('yoldas_user_name');
+      let userPlate = localStorage.getItem('yoldas_user_plate');
+      
+      if (!userName || !userPlate) {
+        const randomNum = Math.floor(100 + Math.random() * 900);
+        userName = `Kaptan ${randomNum}`;
+        userPlate = `${Math.floor(10 + Math.random() * 71)} YLD ${randomNum}`;
+        localStorage.setItem('yoldas_user_name', userName);
+        localStorage.setItem('yoldas_user_plate', userPlate);
+      }
+
+      const participantName = `${userName} (${userPlate})`;
+      const wsUrl = 'wss://yoldas-cf6u5588.livekit.cloud';
+
+      const token = await getLiveKitToken({ data: { roomName, participantName } });
+
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+      });
       roomRef.current = room;
 
-      room.on(RoomEvent.TrackSubscribed, (track) => {
+      const handleTrackSubscribed = (track: RemoteTrack) => {
         if (track.kind === 'audio') {
           const element = track.attach();
           if (audioContainerRef.current) {
             audioContainerRef.current.appendChild(element);
           }
         }
-      });
+      };
+
+      room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
       
+      room.on(RoomEvent.ParticipantConnected, () => updateParticipantsList(room));
+      room.on(RoomEvent.ParticipantDisconnected, () => updateParticipantsList(room));
+
+      await room.connect(wsUrl, token);
+      
+      updateParticipantsList(room);
       setJoined(true);
       setTalking(true);
       
-      const audioTrack = await createLocalAudioTrack();
+      const audioTrack = await createLocalAudioTrack({
+        echoCancellation: true,
+        noiseSuppression: true,
+      });
       await room.localParticipant.publishTrack(audioTrack);
 
     } catch (err) {
       console.error('Canlı ses odasına bağlanılamadı:', err);
       setJoined(false);
+      alert('Canlı ses odasına bağlanırken bir hata oluştu. Lütfen mikrofon izinlerinizi kontrol edin.');
     }
   };
 
@@ -281,33 +329,44 @@ export function Platform({ view = 'home' }: { view?: View }) {
 
   const channelCards = (all = false) => (
     <div className="channel-grid">
-      {channels
-        .slice(0, all ? channels.length : 4)
+      {initialChannels
+        .slice(0, all ? initialChannels.length : 4)
         .map((item, index) => ({ item, index }))
         .filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')))
-        .map(({ item, index }) => (
-          <article className={`channel-card ${joined && channel === index ? 'selected' : ''}`} key={item.name}>
-            <div className="channel-top">
-              <div className={`channel-icon ${item.tone}`}><item.icon size={17} /></div>
-              <span className="live-tag"><i className="live-dot" />CANLI SESLİ ODA</span>
-            </div>
-            <h3>{item.name}</h3>
-            <p>{item.subtitle}</p>
-            <div className="channel-footer">
-              <div className="avatars">
-                {item.initials.map(initial => <Avatar key={initial}>{initial}</Avatar>)}
-                <span><Users size={10} className="inline mr-1" />{item.count}</span>
+        .map(({ item, index }) => {
+          const isCurrentRoom = joined && channel === index;
+          const participantCount = isCurrentRoom ? activeParticipants.length : 0;
+          
+          return (
+            <article className={`channel-card ${isCurrentRoom ? 'selected' : ''}`} key={item.name}>
+              <div className="channel-top">
+                <div className={`channel-icon ${item.tone}`}><item.icon size={17} /></div>
+                <span className="live-tag"><i className="live-dot" />CANLI SESLİ ODA</span>
               </div>
-              <Button
-                variant="outline"
-                className={`join-button ${joined && channel === index ? 'joined' : ''}`}
-                onClick={() => toggleLiveVoiceRoom(index)}
-              >
-                {joined && channel === index ? <><Signal size={12} /> Odadan Ayrıl</> : <><Headphones size={12} /> Canlı Odaya Bağlan</>}
-              </Button>
-            </div>
-          </article>
-        ))}
+              <h3>{item.name}</h3>
+              <p>{item.subtitle}</p>
+              <div className="channel-footer">
+                <div className="avatars">
+                  {isCurrentRoom && activeParticipants.length > 0 ? (
+                    activeParticipants.slice(0, 3).map((pName) => (
+                      <Avatar key={pName}>{pName.substring(0, 2).toUpperCase()}</Avatar>
+                    ))
+                  ) : (
+                    <Avatar>YD</Avatar>
+                  )}
+                  <span><Users size={10} className="inline mr-1" />{participantCount} Sürücü</span>
+                </div>
+                <Button
+                  variant="outline"
+                  className={`join-button ${isCurrentRoom ? 'joined' : ''}`}
+                  onClick={() => toggleLiveVoiceRoom(index)}
+                >
+                  {isCurrentRoom ? <><Signal size={12} /> Odadan Ayrıl</> : <><Headphones size={12} /> Canlı Odaya Bağlan</>}
+                </Button>
+              </div>
+            </article>
+          );
+        })}
     </div>
   );
 
@@ -356,7 +415,7 @@ export function Platform({ view = 'home' }: { view?: View }) {
     <aside className="sidebar"><Link to="/" className="brand"><span className="brand-mark"><Truck size={24} /></span><span className="brand-name">yoldaş<small>YOLUN AÇIK, SESİN AÇIK.</small></span></Link><nav aria-label="Ana menü"><div className="nav-label">YOL ARKADAŞIN</div>{navigation.map(item => <Link key={item.to} to={item.to} className={`nav-link ${view === item.view ? 'active' : ''}`}><item.icon /><span>{item.label}</span>{item.view === 'messages' && <span className="nav-count">3</span>}</Link>)}</nav><div className="nav-label">FAVORİ KANALLARIN</div><Link to="/telsiz" className="room-shortcut" onClick={() => toggleLiveVoiceRoom(0)}><i className="live-dot" />E-5 / TEM Hattı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => toggleLiveVoiceRoom(1)}><i className="live-dot" />Kapıkule Sınır Kapısı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => toggleLiveVoiceRoom(3)}><i className="live-dot" />Gece Sürüşü</Link><div className="sidebar-bottom"><div className="help-box"><strong className="flex gap-2 items-center"><Siren size={16} className="text-warning" />Yolda yalnız değilsin.</strong><p>Bir el uzakta, binlerce yoldaş yanında.</p><Button variant="outline" className="w-full h-8 text-[10px]" onClick={() => { setHelpSent(''); setDialog('help'); }}>Dayanışma çağrısı<ArrowRight size={12} /></Button></div><Button variant="ghost" className="w-full text-muted-foreground justify-start text-[11px]" onClick={() => setDialog('support')}><CircleHelp size={15} /> Yardım & Destek</Button><div className="profile"><Avatar>YD</Avatar><div><strong className="text-[11px]">Sürücü Profili</strong><small className="flex items-center gap-1"><ShieldCheck size={10} /> Onaylı sürücü</small></div><Button variant="ghost" size="icon" aria-label="Profil seçenekleri" onClick={() => setDialog('profile')}><ChevronDown size={14} /></Button></div></div></aside>
     <header className="topbar"><div className="breadcrumb"><Truck size={14} /><ChevronRight size={11} /><strong>{view === 'home' ? 'Genel Bakış' : pageTitles[view][0]}</strong></div><div className="top-actions"><label className="search-box"><Search size={14} className="text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="Kanal, konu veya yol arkadaşı ara..." aria-label="Kanal ara" /><kbd>⌘ K</kbd></label><span className="connection"><i className="live-dot" />1.248 sürücü yolda</span><Button variant="ghost" size="icon" className="notification" aria-label="Bildirimler" onClick={() => setDialog('notifications')}><Bell size={17} /></Button></div></header>
     <main className="page-content content-page" key={view}><div className="page-heading"><div><h1>{pageTitles[view][0]}</h1><p>{pageTitles[view][1]}</p></div><span className="date-label" onClick={handleSecretClick} style={{ cursor: 'pointer', userSelect: 'none' }} title="Yoldaş v1.0"><CalendarDays size={13} />16 Ekim 2026, Cuma</span></div>
-    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Canlı Odaya Bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı ses odaları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact channelName={channels[channel]?.name} /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Aktif Kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel channelName={channels[channel]?.name} />}{view === 'news' && (
+    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Canlı Odaya Bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı ses odaları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact channelName={initialChannels[channel]?.name} /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Aktif Kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel channelName={initialChannels[channel]?.name} />}{view === 'news' && (
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <SectionHeading icon={<Newspaper />} title="Yol Gündemi & İndirimler" />
@@ -376,9 +435,14 @@ export function Platform({ view = 'home' }: { view?: View }) {
     )}{view === 'roads' && <div className="tools-grid"><BorderPanel expanded /><div className="panel"><h2 className="text-base font-semibold flex items-center gap-2"><Navigation size={18} /> Yol bildirimleri</h2><p className="modal-copy">Bolu Tüneli · İstanbul yönü</p><p>Trafik akıcı, yol açık.</p><p className="modal-copy">TEM · Gebze gişeleri</p><p>Yoğunluk nedeniyle yavaş ilerliyor.</p><div className="demo-label">Örnek sürücü bildirimleri</div></div></div>}{view === 'tools' && <div className="tools-grid"><TimerPanel /><FuelCalculator /></div>}</div>}
     </main>
     
-    <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{channels[channel]?.name}</strong><small><i className="live-dot" />{joined ? 'Canlı Ses Odasındasın' : 'Odada Değilsin'}</small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${talking ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Canlı Konferans'}<small>{talking ? 'Mikrofon Açık (Konuşabilirsin)' : 'Susturuldu'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} style={{ background: joined ? (talking ? '#16a34a' : '#dc2626') : '#94a3b8' }} onClick={() => toggleMicrophone()}><Mic size={16} />{joined ? (talking ? 'Mikrofon Açık' : 'Susturuldu') : 'Önce Odaya Katıl'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Oda seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
+    <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{initialChannels[channel]?.name}</strong><small><i className="live-dot" />{joined ? `Canlı Odadasın (${activeParticipants.length} Kişi)` : 'Odada Değilsin'}</small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${talking ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Canlı Konferans'}<small>{talking ? 'Mikrofon Açık (Konuşabilirsin)' : 'Susturuldu'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} style={{ background: joined ? (talking ? '#16a34a' : '#dc2626') : '#94a3b8' }} onClick={() => toggleMicrophone()}><Mic size={16} />{joined ? (talking ? 'Mikrofon Açık' : 'Susturuldu') : 'Önce Odaya Katıl'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Oda seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
     
-    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Ses Odası Bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Canlı Ses Odası'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni sesli oda aktif.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi sohbet başlığından düzenleyebilirsiniz.</p></div> : dialog === 'radio' ? <><p className="modal-copy">{channels[channel]?.name} · Canlı ses odasındasınız.</p><Button variant="outline" onClick={() => { toggleLiveVoiceRoom(channel); setDialog(null); }}>{joined ? <><X />Odadan Ayrıl</> : <><Radio />Odaya Katıl</>}</Button></> : <p className="modal-copy">Yoldaş nakliye ve canlı ses platformu.</p>}</DialogContent></Dialog>
+    <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Ses Odası Bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Canlı Ses Odası'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni sesli oda aktif.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi sohbet başlığından düzenleyebilirsiniz.</p></div> : dialog === 'radio' ? <>
+      <p className="modal-copy">{initialChannels[channel]?.name} · Canlı ses odasındasınız.</p>
+      <Button variant="outline" onClick={() => { toggleLiveVoiceRoom(channel); setDialog(null); }}>
+        {joined ? <><X />Odadan Ayrıl</> : <><Radio />Odaya Katıl</>}
+      </Button>
+    </> : <p className="modal-copy">Yoldaş nakliye ve canlı ses platformu.</p>}</DialogContent></Dialog>
     
     <Dialog open={article !== null} onOpenChange={open => { if (!open) setArticle(null); }}>
       <DialogContent>
