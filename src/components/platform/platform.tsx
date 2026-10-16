@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowDownUp, ArrowRight, Bell, CalendarDays, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Coffee, Compass, Fuel, Headphones, LayoutGrid, MapPin, Menu, MessageSquare, Mic, MicOff, Moon, MoreHorizontal, Navigation, Newspaper, Pause, Play, Radio, Search, Send, Settings2, ShieldCheck, Signal, Siren, Truck, Users, Volume2, VolumeX, Wrench, X } from 'lucide-react';
+import { ArrowDownUp, ArrowRight, Bell, CalendarDays, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Coffee, Compass, Fuel, Headphones, LayoutGrid, MapPin, Menu, MessageSquare, Mic, MicOff, Moon, MoreHorizontal, Navigation, Newspaper, Pause, Play, Plus, Radio, Search, Send, Settings2, ShieldCheck, Signal, Siren, Truck, Users, Volume2, VolumeX, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import truckImage from '@/assets/truck-road.jpg';
@@ -24,10 +24,7 @@ const channels = [
   { name: 'Anadolu Yolları', subtitle: 'Memleketin dört bir yanından.', count: 36, icon: MapPin, tone: 'green', initials: ['AB', 'FK', 'HD'] },
   { name: 'Mola Yeri Sohbetleri', subtitle: 'Çaylar hazır, sohbet koyu.', count: 27, icon: Coffee, tone: 'amber', initials: ['KT', 'GA', 'SK'] },
 ];
-const news = [
-  { category: 'AKARYAKIT', title: 'Motorinde fiyat hareketliliği: sürücülerin gözü pompa fiyatlarında', time: '25 dk önce', image: true, body: 'Akaryakıt maliyetleri nakliye planlamasının önemli bir parçası. Yola çıkmadan önce güzergâhınızdaki güncel pompa fiyatlarını kontrol edin. Bu içerik örnek haber verisidir; güncel fiyat bildirimi değildir.' },
-  { category: 'SEKTÖRDEN', title: 'Avrupa yollarında yeni dönem: dijital takograf gündemi', time: '1 saat önce', image: false, body: 'Uluslararası taşımacılıkta dijital takograf uygulamaları gündemde. Aracınıza ve rotanıza uygulanacak kuralları yetkili makamların güncel duyurularından kontrol edin. Bu içerik örnek haber verisidir.' },
-];
+
 const pageTitles: Record<View, [string, string]> = {
   home: ['Yolun açık olsun, Yoldaş', 'Yolun gündemi, telsizin sesi, dostların burada.'],
   radio: ['Canlı Telsiz', 'Aynı yolda, aynı frekanstayız.'],
@@ -47,24 +44,170 @@ export function Platform({ view = 'home' }: { view?: View }) {
   const [muted, setMuted] = useState(false);
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<'help' | 'notifications' | 'profile' | 'radio' | 'support' | null>(null);
-  const [article, setArticle] = useState<number | null>(null);
+  const [article, setArticle] = useState<any | null>(null);
+  const [newsList, setNewsList] = useState<any[]>([]);
+  const [showAddNewsModal, setShowAddNewsModal] = useState(false);
+  const [newNewsCategory, setNewNewsCategory] = useState('AKARYAKIT');
+  const [newNewsTitle, setNewNewsTitle] = useState('');
+  const [newNewsBody, setNewNewsBody] = useState('');
   const [helpSent, setHelpSent] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Canlı Haberleri Çek
+  useEffect(() => {
+    fetchNews();
+    const newsChannel = supabase
+      .channel('public:news')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'news' }, () => {
+        fetchNews();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(newsChannel);
+    };
+  }, []);
+
+  const fetchNews = async () => {
+    const { data, error } = await supabase.from('news').select('*').order('created_at', { ascending: false });
+    if (!error && data) {
+      setNewsList(data);
+    }
+  };
+
+  const handleCreateNews = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNewsTitle.trim() || !newNewsBody.trim()) return;
+
+    const { error } = await supabase.from('news').insert([
+      {
+        category: newNewsCategory,
+        title: newNewsTitle.trim(),
+        body: newNewsBody.trim()
+      }
+    ]);
+
+    if (!error) {
+      setNewNewsTitle('');
+      setNewNewsBody('');
+      setShowAddNewsModal(false);
+      fetchNews();
+    }
+  };
 
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus(); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
   const selectChannel = (index: number) => { setChannel(index); setJoined(true); setTalking(false); };
   const channelCards = (all = false) => <div className="channel-grid">{channels.slice(0, all ? channels.length : 4).map((item, index) => ({ item, index })).filter(({ item }) => item.name.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr'))).map(({ item, index }) => <article className={`channel-card ${joined && channel === index ? 'selected' : ''}`} key={item.name}><div className="channel-top"><div className={`channel-icon ${item.tone}`}><item.icon size={17} /></div><span className="live-tag"><i className="live-dot" />CANLI</span></div><h3>{item.name}</h3><p>{item.subtitle}</p><div className="channel-footer"><div className="avatars">{item.initials.map(initial => <Avatar key={initial}>{initial}</Avatar>)}<span><Users size={10} className="inline mr-1" />{item.count}</span></div><Button variant="outline" className={`join-button ${joined && channel === index ? 'joined' : ''}`} onClick={() => selectChannel(index)}>{joined && channel === index ? <><Signal size={12} /> Bağlısın</> : <><Headphones size={12} /> Kanala katıl</>}</Button></div></article>)}</div>;
-  const newsCards = <div className="news-grid">{news.map((item, index) => <article className="news-card" key={item.title}><div className={`news-cover ${index ? 'second' : ''}`}><img src={truckImage} alt={index ? 'Avrupa güzergâhında ağır vasıta' : 'Uzun yolda nakliye tırı'} width={1600} height={640} loading="lazy" /><span className="news-category">{item.category}</span></div><div className="news-copy"><Button variant="ghost" className="h-auto p-0 whitespace-normal text-left justify-start" onClick={() => setArticle(index)}><h3>{item.title}</h3></Button><div className="news-meta"><Clock3 size={10} />{item.time}<span className="ml-auto">Yoldaş Editör</span></div></div></article>)}</div>;
+
+  const renderNewsCards = (
+    <div className="news-grid">
+      {newsList.length === 0 ? (
+        <p className="text-xs text-muted-foreground p-4">Henüz yayınlanmış bir gündem haberi yok.</p>
+      ) : (
+        newsList.map((item, index) => (
+          <article className="news-card" key={item.id || index}>
+            <div className={`news-cover ${index % 2 !== 0 ? 'second' : ''}`}>
+              <img src={truckImage} alt="Yoldaş Haber" width={1600} height={640} loading="lazy" />
+              <span className="news-category">{item.category}</span>
+            </div>
+            <div className="news-copy">
+              <Button variant="ghost" className="h-auto p-0 whitespace-normal text-left justify-start" onClick={() => setArticle(item)}>
+                <h3>{item.title}</h3>
+              </Button>
+              <div className="news-meta">
+                <Clock3 size={10} />
+                {item.created_at ? new Date(item.created_at).toLocaleDateString('tr-TR') : 'Şimdi'}
+                <span className="ml-auto">Yoldaş Editör</span>
+              </div>
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  );
 
   return <div className="app-shell">
     <aside className="sidebar"><Link to="/" className="brand"><span className="brand-mark"><Truck size={24} /></span><span className="brand-name">yoldaş<small>YOLUN AÇIK, TELSİZİN AÇIK.</small></span></Link><nav aria-label="Ana menü"><div className="nav-label">YOL ARKADAŞIN</div>{navigation.map(item => <Link key={item.to} to={item.to} className={`nav-link ${view === item.view ? 'active' : ''}`}><item.icon /><span>{item.label}</span>{item.view === 'messages' && <span className="nav-count">3</span>}</Link>)}</nav><div className="nav-label">FAVORİ KANALLARIN</div><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(0)}><i className="live-dot" />E-5 / TEM Hattı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(1)}><i className="live-dot" />Kapıkule Sınır Kapısı</Link><Link to="/telsiz" className="room-shortcut" onClick={() => selectChannel(3)}><i className="live-dot" />Gece Sürüşü</Link><div className="sidebar-bottom"><div className="help-box"><strong className="flex gap-2 items-center"><Siren size={16} className="text-warning" />Yolda yalnız değilsin.</strong><p>Bir el uzakta, binlerce yoldaş yanında.</p><Button variant="outline" className="w-full h-8 text-[10px]" onClick={() => { setHelpSent(''); setDialog('help'); }}>Dayanışma çağrısı<ArrowRight size={12} /></Button></div><Button variant="ghost" className="w-full text-muted-foreground justify-start text-[11px]" onClick={() => setDialog('support')}><CircleHelp size={15} /> Yardım & Destek</Button><div className="profile"><Avatar>YD</Avatar><div><strong className="text-[11px]">Sürücü Profili</strong><small className="flex items-center gap-1"><ShieldCheck size={10} /> Onaylı sürücü</small></div><Button variant="ghost" size="icon" aria-label="Profil seçenekleri" onClick={() => setDialog('profile')}><ChevronDown size={14} /></Button></div></div></aside>
     <header className="topbar"><div className="breadcrumb"><Truck size={14} /><ChevronRight size={11} /><strong>{view === 'home' ? 'Genel Bakış' : pageTitles[view][0]}</strong></div><div className="top-actions"><label className="search-box"><Search size={14} className="text-muted-foreground" /><input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="Kanal, konu veya yol arkadaşı ara..." aria-label="Kanal ara" /><kbd>⌘ K</kbd></label><span className="connection"><i className="live-dot" />1.248 sürücü yolda</span><Button variant="ghost" size="icon" className="notification" aria-label="Bildirimler" onClick={() => setDialog('notifications')}><Bell size={17} /></Button></div></header>
     <main className="page-content content-page" key={view}><div className="page-heading"><div><h1>{pageTitles[view][0]}</h1><p>{pageTitles[view][1]}</p></div><span className="date-label"><CalendarDays size={13} />16 Ekim 2026, Cuma</span></div>
-    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Telsize bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı telsiz kanalları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{newsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Örnek kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel />}{view === 'news' && newsCards}{view === 'roads' && <div className="tools-grid"><BorderPanel expanded /><div className="panel"><h2 className="text-base font-semibold flex items-center gap-2"><Navigation size={18} /> Yol bildirimleri</h2><p className="modal-copy">Bolu Tüneli · İstanbul yönü</p><p>Trafik akıcı, yol açık.</p><p className="modal-copy">TEM · Gebze gişeleri</p><p>Yoğunluk nedeniyle yavaş ilerliyor.</p><div className="demo-label">Örnek sürücü bildirimleri · Canlı veri değildir</div></div></div>}{view === 'tools' && <div className="tools-grid"><TimerPanel /><FuelCalculator /></div>}</div>}
+    {view === 'home' ? <div className="content-grid"><div className="main-column"><section className="hero"><img src={truckImage} width={1600} height={640} alt="Dağ yolunda ilerleyen ağır vasıta" fetchPriority="high" /><div className="hero-copy"><div className="eyebrow"><i className="live-dot" />YOLLAR UZUN, DOSTLUK YAKIN.</div><h2>Yolun her kilometresinde<br />bir yoldaşın var.</h2><p>Aynı yolu paylaşanlarla buluş. Telsize bağlan,<br />haberdar ol, güvenle yol al.</p><Button asChild className="hero-action"><Link to="/telsiz"><Radio size={13} />Telsize bağlan<ArrowRight size={12} /></Link></Button></div><div className="hero-pager"><i /><i /><i /></div></section><section><SectionHeading icon={<Radio />} title="Canlı telsiz kanalları" count="24 aktif kanal" to="/telsiz" />{channelCards()}</section><section className="news-section"><SectionHeading icon={<Newspaper />} title="Yolun gündemi" to="/gundem" />{renderNewsCards}</section></div><aside className="right-column"><BorderPanel /><TimerPanel /><ChatPanel compact /></aside></div> : <div className="module-content">{view === 'radio' && <><SectionHeading icon={<Radio />} title="Frekansını bul" count="Örnek kanallar" />{channelCards(true)}</>}{view === 'messages' && <ChatPanel />}{view === 'news' && (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <SectionHeading icon={<Newspaper />} title="Yol Gündemi & İndirimler" />
+          <Button onClick={() => setShowAddNewsModal(true)} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Plus size={16} /> Haber / Duyuru Paylaş
+          </Button>
+        </div>
+        {renderNewsCards}
+      </div>
+    )}{view === 'roads' && <div className="tools-grid"><BorderPanel expanded /><div className="panel"><h2 className="text-base font-semibold flex items-center gap-2"><Navigation size={18} /> Yol bildirimleri</h2><p className="modal-copy">Bolu Tüneli · İstanbul yönü</p><p>Trafik akıcı, yol açık.</p><p className="modal-copy">TEM · Gebze gişeleri</p><p>Yoğunluk nedeniyle yavaş ilerliyor.</p><div className="demo-label">Örnek sürücü bildirimleri</div></div></div>}{view === 'tools' && <div className="tools-grid"><TimerPanel /><FuelCalculator /></div>}</div>}
     </main>
     <footer className="radio-dock"><div className="radio-station"><div className="radio-station-icon"><Radio size={23} /></div><div><strong>{channels[channel]?.name}</strong><small><i className="live-dot" />{joined ? 'Kanala bağlısın' : 'Bağlantı kapalı'}<span className="text-muted-foreground"> · Önizleme</span></small></div></div><div className="divider" /><div className="radio-center"><Avatar className="speaker-avatar">YD</Avatar><div className={`waveform ${joined ? 'is-speaking' : ''}`} aria-hidden="true">{Array.from({ length: 42 }, (_, i) => <i key={i} />)}</div><div className="speaker-info">{'Sürücü Telsizi'}<small>{talking ? 'Mikrofon açık' : 'Dinlemede'}</small></div></div><div className="radio-controls"><Button variant="ghost" size="icon" className="dock-icon sound-button" aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} onClick={() => setMuted(!muted)}>{muted ? <VolumeX /> : <Volume2 />}</Button><input type="range" min="0" max="100" defaultValue="65" aria-label="Ses seviyesi" className="volume-control" /><Button className={`ptt-button ${talking ? 'talking' : ''}`} disabled={!joined} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setTalking(true); }} onPointerUp={() => setTalking(false)} onPointerCancel={() => setTalking(false)}><Mic size={16} />{talking ? 'Konuşuyorsun' : 'Basılı tut, konuş'}</Button><Button variant="ghost" size="icon" className="dock-icon" aria-label="Telsiz seçenekleri" onClick={() => setDialog('radio')}><MoreHorizontal /></Button></div></footer>
     <Dialog open={dialog !== null} onOpenChange={open => { if (!open) setDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{dialog === 'help' ? 'Yoldaş dayanışması' : dialog === 'notifications' ? 'Bildirimler' : dialog === 'profile' ? 'Sürücü profili' : dialog === 'radio' ? 'Telsiz bağlantısı' : 'Yardım & Destek'}</DialogTitle><DialogDescription>{dialog === 'help' ? 'Güvenli bir noktada durduktan sonra çağrı oluştur.' : 'Yoldaş · Etkileşimli önizleme'}</DialogDescription></DialogHeader>{dialog === 'help' ? helpSent ? <div className="modal-copy"><Check className="text-live mb-3" /><strong>{helpSent}</strong><p>Örnek çağrın hazırlandı. Gerçek acil durumlarda 112’yi ara.</p></div> : <div className="modal-options">{['Yolda kaldım', 'Çekici lazım', 'Mola yeri tavsiyesi'].map((item, i) => <Button key={item} variant="outline" className="modal-option" onClick={() => setHelpSent(item)}>{i === 2 ? <Coffee /> : <Truck />}{item}<ArrowRight className="ml-auto" /></Button>)}<p className="modal-copy">Acil durumlarda 112’yi ara.</p></div> : dialog === 'notifications' ? <div className="modal-copy"><p>🟢 Kapıkule kanalında yeni yol bildirimleri var.</p></div> : dialog === 'profile' ? <div className="flex flex-col gap-3 py-2"><p className="text-xs text-muted-foreground">Kayıtlı sürücü kimliğinizi buradan güncelleyebilirsiniz.</p></div> : dialog === 'radio' ? <><p className="modal-copy">{channels[channel]?.name} · Telsiz kanalındasınız.</p><Button variant="outline" onClick={() => { setJoined(!joined); setTalking(false); setDialog(null); }}>{joined ? <><X />Kanaldan ayrıl</> : <><Radio />Yeniden katıl</>}</Button></> : <p className="modal-copy">Yoldaş nakliye ve iletişim platformu.</p>}</DialogContent></Dialog>
-    <Dialog open={article !== null} onOpenChange={open => { if (!open) setArticle(null); }}><DialogContent><DialogHeader><DialogTitle>{article !== null ? news[article]?.title : ''}</DialogTitle><DialogDescription>Yoldaş Editör</DialogDescription></DialogHeader><img src={truckImage} alt="Uzun yol taşımacılığı" width={1600} height={640} className="rounded-md" /><p className="modal-copy">{article !== null ? news[article]?.body : ''}</p></DialogContent></Dialog>
+    
+    {/* Haber Detay Modali */}
+    <Dialog open={article !== null} onOpenChange={open => { if (!open) setArticle(null); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{article?.title}</DialogTitle>
+          <DialogDescription>{article?.category} · Yoldaş Editör</DialogDescription>
+        </DialogHeader>
+        <img src={truckImage} alt="Uzun yol taşımacılığı" width={1600} height={640} className="rounded-md" />
+        <p className="modal-copy" style={{ marginTop: '12px', lineHeight: '1.6' }}>{article?.body}</p>
+      </DialogContent>
+    </Dialog>
+
+    {/* Haber / Duyuru Ekleme Modali */}
+    <Dialog open={showAddNewsModal} onOpenChange={setShowAddNewsModal}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Yeni Yol Gündemi / Haber Ekle</DialogTitle>
+          <DialogDescription>
+            Sürücülere aktarmak istediğin haber, mazot indirimi veya yol uyarısını paylaş.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleCreateNews} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Kategori:</label>
+            <select
+              value={newNewsCategory}
+              onChange={(e) => setNewNewsCategory(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
+            >
+              <option value="AKARYAKIT">AKARYAKIT / MAZOT İNDİRİMİ</option>
+              <option value="SEKTÖRDEN">SEKTÖRDEN HABERLER</option>
+              <option value="YOL DURUMU">YOL & TRAFİK UYARISI</option>
+              <option value="TAKOGRAF">TAKOGRAF & MEVZUAT</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Başlık:</label>
+            <input
+              type="text"
+              required
+              placeholder="Örn: Motorine 1.5 TL İndirim Geliyor!"
+              value={newNewsTitle}
+              onChange={(e) => setNewNewsTitle(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Açıklama / Detay:</label>
+            <textarea
+              required
+              rows={4}
+              placeholder="Haber veya duyurunun detaylarını buraya yazabilirsiniz..."
+              value={newNewsBody}
+              onChange={(e) => setNewNewsBody(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', marginTop: '4px' }}
+            />
+          </div>
+          <Button type="submit" className="w-full mt-2">
+            Gündemi Yayınla
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 
