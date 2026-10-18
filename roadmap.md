@@ -1,0 +1,12 @@
+# Yol Arkadaşı
+- [x] Türkçe koyu temalı telsiz ve topluluk ana ekranı
+- [x] Kanal seçimi, örnek mesajlaşma, bildirim ve dayanışma etkileşimleri
+- [x] Yakıt hesaplayıcı (sürüş/takograf sayacı ana ekrandan kaldırıldı)
+- [x] Ana ekran uygulama simgesi ve kurulum bilgileri
+- [x] Masaüstü/mobil görünüm ve temel akış kontrolleri
+- [x] Referans görsele uygun aydınlık, turkuaz ve renkli arayüz
+- [x] Yeni görünümde masaüstü/mobil ve etkileşim kontrolleri
+- [x] Sürücü Araçları: yakınımda ara, sefer maliyeti, belge takibi, sınır evrak listesi, acil numaralar
+- [x] Mesaj bildirme / sürücü engelleme, gizlilik politikası sayfası, yönetici yetkisi sıkılaştırıldı
+- [ ] Play Store yayını (bkz. PLAY-STORE.md)
+- [ ] Çevrimdışı yedek sayfa, push bildirimi, hesap/kimlik doğrulama, otomatik moderasyon

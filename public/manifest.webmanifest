@@ -1,0 +1,62 @@
+{
+ "name": "Yoldaş — Yolun açık, telsizin açık",
+ "short_name": "Yoldaş",
+ "description": "Tır ve ağır vasıta sürücüleri için sesli telsiz odaları, sohbet, yol ve sınır durumu ile sürücü araçları.",
+ "lang": "tr",
+ "dir": "ltr",
+ "id": "/",
+ "start_url": "/?source=pwa",
+ "scope": "/",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#f3fafb",
+ "theme_color": "#f3fafb",
+ "categories": [
+  "travel",
+  "navigation",
+  "social"
+ ],
+ "icons": [
+  {
+   "src": "/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "/icon-192-maskable.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "maskable"
+  },
+  {
+   "src": "/icon-512-maskable.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ],
+ "shortcuts": [
+  {
+   "name": "Canlı Telsiz",
+   "short_name": "Telsiz",
+   "url": "/telsiz"
+  },
+  {
+   "name": "Sürücü Araçları",
+   "short_name": "Araçlar",
+   "url": "/araclar"
+  },
+  {
+   "name": "Yol & Sınır",
+   "short_name": "Yol",
+   "url": "/yol-durumu"
+  }
+ ]
+}
